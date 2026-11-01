@@ -766,7 +766,7 @@ import { notify } from "../../../store/appStore";
 import { asrStore } from "../../../store/asrStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
 import type { AsrSettings } from "../../../api/asr";
-import type { AsrModelState, AsrProviderConfig, SiteSettings } from "../../../data/mock";
+import type { AsrModelState, AsrProviderConfig, SiteSettings } from "../../../types/domain";
 
 // ── 兼容层：语音设置改存后端 speech_setting 表，模板一行不改 ──────────────
 //

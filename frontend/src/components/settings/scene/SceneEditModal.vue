@@ -443,7 +443,7 @@ import {
   ROOT_CATEGORY,
   VIRTUAL_CATEGORY,
 } from "../background/categories";
-import type { LightingParams, SceneInfo } from "../../../data/mock";
+import type { LightingParams, SceneInfo } from "../../../types/domain";
 
 const props = defineProps<{
   show: boolean;

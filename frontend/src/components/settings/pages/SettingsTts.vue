@@ -657,7 +657,7 @@ import {
 import { MenuItem, MenuPage } from "../../ui";
 import { store, updateSettings } from "../../../store/appStore";
 import { alertDialog } from "../../../store/dialogStore";
-import type { SiteSettings } from "../../../data/mock";
+import type { SiteSettings } from "../../../types/domain";
 
 type SettingValue = string | number | boolean;
 type EngineFieldType = "text" | "password" | "number" | "range" | "select" | "file" | "switch";

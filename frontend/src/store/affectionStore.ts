@@ -1,14 +1,10 @@
 /**
  * 面试印象（原好感度）状态：六维正值 + 六维负面 + 变化历史。
- * 初始值来自 data/mock.ts 的 affection / affectionHistory，
+ * 后端暂无印象评估接口，初始值一律为 0（未评估状态），
  * 变化通过 applyAffectionChange 记录，驱动 AffectionChangeFloat / AffectionPanel。
  */
 import { computed, reactive } from "vue";
-import {
-  affection as initialAffection,
-  affectionHistory as seedHistory,
-  type AffectionHistoryEntry,
-} from "../data/mock";
+import type { AffectionHistoryEntry } from "../types/domain";
 
 export interface AffectionVector {
   fondness: number;
@@ -37,38 +33,32 @@ export interface AffectionChangeRecord {
 
 export const AFFECTION_ROLE_ID = 1;
 
-/** 标量初值摊到六维：主维 fondness 承担与均值的差，其余围绕均值微调 */
-function seedDims(avg: number): AffectionVector {
-  const base: AffectionVector = {
-    fondness: avg + 6,
-    trust: avg + 2,
-    intimacy: avg - 4,
-    rapport: avg + 3,
-    interest: avg - 2,
-    longing: avg - 5,
-  };
-  const sum = Object.values(base).reduce((a, b) => a + b, 0);
-  base.fondness += avg * 6 - sum;
-  return base;
-}
-
 export const affectionStore = reactive({
   roleId: AFFECTION_ROLE_ID,
-  dims: seedDims(initialAffection) as AffectionVector,
+  dims: {
+    fondness: 0,
+    trust: 0,
+    intimacy: 0,
+    rapport: 0,
+    interest: 0,
+    longing: 0,
+  } as AffectionVector,
   negDims: {
-    anger: 6,
-    hurt: 3,
-    disappointment: 14,
-    indifference: 2,
+    anger: 0,
+    hurt: 0,
+    disappointment: 0,
+    indifference: 0,
     jealousy: 0,
-    estrangement: 4,
+    estrangement: 0,
   } as NegativeVector,
-  history: [...seedHistory] as AffectionHistoryEntry[],
+  history: [] as AffectionHistoryEntry[],
   lastChange: null as AffectionChangeRecord | null,
 });
 
-export const affectionAverage = computed(() =>
-  Math.round(
+/** 六维平均值；后端还没有印象评估接口，没有历史记录时视为「未评估」（null） */
+export const affectionAverage = computed<number | null>(() => {
+  if (affectionStore.history.length === 0) return null;
+  return Math.round(
     (affectionStore.dims.fondness +
       affectionStore.dims.trust +
       affectionStore.dims.intimacy +
@@ -76,8 +66,8 @@ export const affectionAverage = computed(() =>
       affectionStore.dims.interest +
       affectionStore.dims.longing) /
       6,
-  ),
-);
+  );
+});
 
 export const negativePeak = computed(() => Math.max(...Object.values(affectionStore.negDims)));
 
@@ -92,7 +82,7 @@ export function applyAffectionChange(
   negativeDeltas: Partial<NegativeVector>,
   reason: string,
 ): void {
-  const before = affectionAverage.value;
+  const before = affectionAverage.value ?? 0;
   for (const [k, v] of Object.entries(deltas) as [keyof AffectionVector, number][]) {
     affectionStore.dims[k] += v ?? 0;
   }
@@ -102,8 +92,8 @@ export function applyAffectionChange(
   affectionStore.lastChange = { roleId: AFFECTION_ROLE_ID, deltas, negativeDeltas, reason };
   affectionStore.history.push({
     time: nowTime(),
-    delta: affectionAverage.value - before,
-    value: affectionAverage.value,
+    delta: (affectionAverage.value ?? 0) - before,
+    value: affectionAverage.value ?? 0,
     reason,
   });
 }

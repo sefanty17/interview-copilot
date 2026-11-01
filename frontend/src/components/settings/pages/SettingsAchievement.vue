@@ -4,7 +4,7 @@
       <template #header>
         <Award :size="20" />
       </template>
-      <div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+      <div v-if="sortedAchievements.length" class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         <div
           v-for="achievement in sortedAchievements"
           :key="achievement.id"
@@ -74,6 +74,10 @@
           </div>
         </div>
       </div>
+
+      <p v-else class="py-16 text-center text-sm text-white/40">
+        成就系统尚未接入后端，暂无成就数据。
+      </p>
     </MenuItem>
   </MenuPage>
 </template>
@@ -82,11 +86,14 @@
 import { computed } from "vue";
 import { Award } from "@lucide/vue";
 import { MenuPage, MenuItem } from "../../ui";
-import { interviewAchievements, type InterviewAchievement } from "../../../data/mock";
+import type { InterviewAchievement } from "../../../types/domain";
 import { notify } from "../../../store/appStore";
 
+/** 后端暂无成就接口：列表恒为空，页面显示空态 */
+const achievements: InterviewAchievement[] = [];
+
 const sortedAchievements = computed<InterviewAchievement[]>(() =>
-  [...interviewAchievements].sort((a, b) => {
+  [...achievements].sort((a, b) => {
     if (a.unlocked && !b.unlocked) return -1;
     if (!a.unlocked && b.unlocked) return 1;
     if (!a.unlocked && !b.unlocked) {

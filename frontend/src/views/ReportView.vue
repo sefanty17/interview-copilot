@@ -265,14 +265,14 @@ import { useRoute, useRouter } from "vue-router";
 import PageShell from "../components/ui/PageShell.vue";
 import MenuItem from "../components/settings/MenuItem.vue";
 import RadarChart from "../components/ui/RadarChart.vue";
-import { jobs } from "../data/mock";
+import { jobs } from "../data/jobs";
 import { findInterviewer } from "../data/interviewers";
 import { store } from "../store/appStore";
 import { fetchEvaluation, runEvaluation, type EvaluationResult } from "../api/evaluation";
 import { fetchSummary, runSummary, type DialogueSummary } from "../api/summary";
 import { fetchExpression, type ExpressionReport } from "../api/expression";
 import { fetchSessionDetail } from "../api/chat";
-import type { InterviewRecord } from "../data/mock";
+import type { InterviewRecord } from "../types/domain";
 
 const route = useRoute();
 const router = useRouter();

@@ -38,7 +38,7 @@ npm run preview
 
 ## 数据与状态
 
-- 全部 mock 数据在 `src/data/mock.ts`；
+- 种子数据（人设 / 岗位 / 题库 / 场景 / 默认设置）在 `src/data/`、`src/constants/`，领域类型在 `src/types/domain.ts`；
 - 设置、剧本、记录、进行中的会话保存在 `localStorage`（key: `interview-lab-v1`）；
 - 「继续面试」依赖本地保存的 session；
 - 报告页支持 `window.print()` 导出/打印。
@@ -50,7 +50,9 @@ src/
   components/menu/     首页菜单与全息人物
   components/ui/       ConsoleShell、雷达图、折线图
   views/               7 个页面
-  data/mock.ts         人设、岗位、题目、记录、剧本
+  data/                人设、岗位、题库、场景、剧本
+  constants/           默认设置、LLM 预设
+  types/domain.ts      领域类型定义
   store/appStore.ts    localStorage 状态
   styles/              tokens / base / menu / console / views
 ```

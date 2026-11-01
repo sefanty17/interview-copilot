@@ -156,9 +156,9 @@ import { Clock, LayoutList, PencilLine, Save } from "@lucide/vue";
 import { MenuItem, MenuPage } from "../../ui";
 import { addRecord, currentJob, currentPersona, notify, persist, store } from "../../../store/appStore";
 import { confirmDialog } from "../../../store/dialogStore";
-import type { InterviewRecord } from "../../../data/mock";
+import type { InterviewRecord } from "../../../types/domain";
 
-/** 本项目在面试记录上附加的两个字段：存档名、当前对话快照（不改 data/mock.ts 的类型） */
+/** 本项目在面试记录上附加的两个字段：存档名、当前对话快照（不改 InterviewRecord 的类型） */
 interface SaveTranscriptLine {
   role: "ai" | "user";
   text: string;

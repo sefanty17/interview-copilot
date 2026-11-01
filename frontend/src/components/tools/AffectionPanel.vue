@@ -103,7 +103,7 @@
                             class="text-2xl leading-none font-bold tabular-nums"
                             :style="{ color: tierColor }"
                           >
-                            {{ average }}
+                            {{ average ?? "—" }}
                           </span>
                           <span
                             class="affection-tier-badge"
@@ -286,7 +286,7 @@ import {
   type AffectionVector,
   type NegativeVector,
 } from "../../store/affectionStore";
-import { personas } from "../../data/mock";
+import { personas } from "../../data/personas";
 import { store } from "../../store/appStore";
 
 /** 心跳/波浪动画（当前常开；接入高级设置后由设置项控制） */

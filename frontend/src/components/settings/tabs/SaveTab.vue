@@ -92,7 +92,7 @@ import { useRouter } from "vue-router";
 import MenuItem from "../MenuItem.vue";
 import { confirmDialog } from "../../../store/dialogStore";
 import { currentJob, currentPersona, notify, persist, store } from "../../../store/appStore";
-import type { InterviewRecord } from "../../../data/mock";
+import type { InterviewRecord } from "../../../types/domain";
 
 const router = useRouter();
 

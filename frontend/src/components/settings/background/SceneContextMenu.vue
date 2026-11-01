@@ -109,7 +109,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import { CircleDot, Pencil, Star, Trash2 } from "@lucide/vue";
-import type { SceneInfo } from "../../../data/mock";
+import type { SceneInfo } from "../../../types/domain";
 
 const props = defineProps<{
   visible: boolean;
