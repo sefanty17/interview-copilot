@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -108,6 +110,83 @@ class TrendServiceTest {
         assertEquals(64, logic.averageScore());
 
         assertTrue(fit.hits().size() == 1 && logic.hits().size() == 1, "替身命中的片段要原样带出");
+    }
+
+    /** 3 天练习计划：前两天按最弱 → 次弱，第三天综合并链到最后一场报告。 */
+    @Test
+    void 练习计划按最弱两维度排三天() {
+        when(retrievalService.search(anyString(), any(), any(), any(), any())).thenReturn(List.of());
+
+        // fit 50 < logic 60 < depth 74 < technical 84
+        Long only = newSession(1L, LocalDateTime.of(2026, 10, 1, 9, 0));
+        newEvaluation(only, "java", 65, "第一场", dims(84, 74, 60, 50));
+
+        TrendView view = trendService.trend(null);
+
+        assertEquals(3, view.practicePlan().size(), "固定三天，一天一项");
+
+        TrendView.PracticeDay day1 = view.practicePlan().get(0);
+        assertEquals(1, day1.day());
+        assertEquals("fit", day1.dimCode(), "第一天练最弱的维度");
+        assertEquals("岗位匹配度", day1.label());
+        assertEquals("/interview", day1.entryRoute());
+        assertFalse(day1.tasks().isEmpty(), "每天都要有可执行动作");
+        assertTrue(day1.title().startsWith("专项："), day1.title());
+
+        TrendView.PracticeDay day2 = view.practicePlan().get(1);
+        assertEquals(2, day2.day());
+        assertEquals("logic", day2.dimCode(), "第二天练次弱的维度");
+
+        TrendView.PracticeDay day3 = view.practicePlan().get(2);
+        assertEquals(3, day3.day());
+        assertNull(day3.dimCode(), "第三天是综合复盘，不对应单一维度");
+        assertEquals("综合复盘", day3.label());
+        assertEquals("/report/s-" + only + "?sid=" + only, day3.entryRoute(),
+                "综合复盘入口要指向最后一场报告");
+    }
+
+    /**
+     * 练习计划的任务要把该维度的<b>最新模型评语</b>嵌进第一条。
+     *
+     * <p>这是「计划个性化」的判据：只给维度名和通用步骤的话，和网上抄来的模板
+     * 没有区别；评语是模型针对这个人说的具体话。
+     */
+    @Test
+    void 练习计划的任务带上最近一次评语() {
+        when(retrievalService.search(anyString(), any(), any(), any(), any())).thenReturn(List.of());
+
+        Long only = newSession(1L, LocalDateTime.of(2026, 10, 1, 9, 0));
+        newEvaluation(only, "java", 65, "第一场", dims(84, 74, 60, 50));
+
+        TrendView view = trendService.trend(null);
+
+        TrendView.PracticeDay day1 = view.practicePlan().get(0);
+        String first = day1.tasks().get(0);
+        assertTrue(first.contains("岗位匹配度-2"),
+                "第一条任务要引用该维度的最新评语原文，实际：" + first);
+        // 通用步骤仍跟在评语后面，不能因为加了评语把原有动作挤掉
+        assertTrue(day1.tasks().size() > 1, "评语之外仍要有可执行动作");
+    }
+
+    /** 评语为空时不能出现空任务，退回纯通用步骤。 */
+    @Test
+    void 评语为空时任务退回通用步骤() {
+        when(retrievalService.search(anyString(), any(), any(), any(), any())).thenReturn(List.of());
+
+        Long only = newSession(1L, LocalDateTime.of(2026, 10, 1, 9, 0));
+        newEvaluation(only, "java", 65, "第一场", dims(84, 74, 60, 50));
+        // 把所有评语清空，模拟老数据 / 模型没给评语
+        for (InterviewEvaluationDimension row : dimensionRepository.findBySessionIdOrderByIdAsc(only)) {
+            row.setComment("");
+            dimensionRepository.save(row);
+        }
+
+        TrendView view = trendService.trend(null);
+
+        TrendView.PracticeDay day1 = view.practicePlan().get(0);
+        assertFalse(day1.tasks().isEmpty(), "评语为空也要有任务");
+        assertFalse(day1.tasks().get(0).contains("模型上次的点评"),
+                "没有评语时不该出现空的引用句：" + day1.tasks().get(0));
     }
 
     private Long newSession(Long scriptId, LocalDateTime endedAt) {

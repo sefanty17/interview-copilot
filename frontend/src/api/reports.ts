@@ -54,6 +54,21 @@ export interface TrendView {
   requiredPoints: number;
   points: TrendPoint[];
   recommendations: TrendRecommendation[];
+  /** 3 天练习计划；没有评估数据时为空数组 */
+  practicePlan: TrendPracticeDay[];
+}
+
+/** 练习计划里的一天（后端 `TrendView.PracticeDay`）。 */
+export interface TrendPracticeDay {
+  day: number;
+  /** 针对的维度 code；第 3 天是综合复盘，为 null */
+  dimCode: string | null;
+  label: string;
+  title: string;
+  tasks: string[];
+  /** 前端直接 push 的路由 */
+  entryRoute: string;
+  entryLabel: string;
 }
 
 /** 拉趋势；后端不可达时抛错，由调用方决定是否静默降级。 */

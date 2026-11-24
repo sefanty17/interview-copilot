@@ -199,6 +199,41 @@
         </p>
       </div>
     </MenuItem>
+
+    <MenuItem v-if="practicePlan.length" size="large" title="3 天练习计划" icon="◷">
+      <p class="mb-3 text-xs text-white/45">
+        按最近几场平均分最低的两个维度排的 3 天计划：前两天各攻一个短板，第三天合起来面一场。
+      </p>
+      <div class="grid gap-4 md:grid-cols-3">
+        <div
+          v-for="day in practicePlan"
+          :key="day.day"
+          class="flex h-full flex-col rounded-xl border border-white/10 bg-white/[0.04] p-4"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-mono text-[10px] font-bold tracking-wider text-[#79d9ff]">DAY {{ day.day }}</span>
+            <span class="shrink-0 rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/60">
+              {{ day.label }}
+            </span>
+          </div>
+          <div class="mt-2 text-sm font-bold leading-relaxed text-white">{{ day.title }}</div>
+          <ul class="mt-2 space-y-1.5 text-[11px] leading-relaxed text-white/55">
+            <li v-for="(task, i) in day.tasks" :key="i" class="flex gap-1.5">
+              <span class="shrink-0 text-[#79d9ff]/70">{{ i + 1 }}.</span>
+              <span>{{ task }}</span>
+            </li>
+          </ul>
+          <div class="mt-auto pt-3">
+            <button
+              class="cursor-pointer rounded-full border border-[#79d9ff]/40 bg-[#79d9ff]/15 px-4 py-1.5 text-xs font-bold text-[#79d9ff] transition-colors hover:bg-[#79d9ff]/25"
+              @click="router.push(day.entryRoute)"
+            >
+              {{ day.entryLabel }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </MenuItem>
   </PageShell>
 </template>
 
@@ -214,7 +249,9 @@ import { findInterviewer } from "../store/interviewers";
 import { confirmDialog } from "../store/dialogStore";
 import { notify, persist, startSession, store } from "../store/appStore";
 import { deleteSession, fetchSessions, isBackendUp, type SessionSummary } from "../api/chat";
-import { fetchTrend, type TrendPoint, type TrendRecommendation } from "../api/reports";
+import { fetchTrend, type TrendPoint, type TrendPracticeDay, type TrendRecommendation } from "../api/reports";
+import { seedScripts } from "../data/scripts";
+import type { PersonaId } from "../types/domain";
 
 const router = useRouter();
 
@@ -323,6 +360,7 @@ async function removeSelected() {
 const trendPoints = ref<TrendPoint[]>([]);
 const requiredPoints = ref(3);
 const recommendations = ref<TrendRecommendation[]>([]);
+const practicePlan = ref<TrendPracticeDay[]>([]);
 
 const trendLabels = computed(() => trendPoints.value.map((p) => p.date.slice(5, 10)));
 
@@ -349,12 +387,34 @@ const trendSeries = computed(() => {
   return [total, ...dims];
 });
 
-/** 短板推荐点进去＝同岗位新开一场练习 */
+/**
+ * 短板推荐点进去＝同岗位开一场<b>剧本</b>面试。
+ *
+ * <p>为什么必须是剧本模式而不是自由对话：成长曲线与提升路径只统计剧本场次
+ * （自由对话 `script_id` 为空、也不产生评估）。如果开自由面试，练完这一场
+ * 不会进曲线、也不会回流到「短板」，闭环就断了——「练习—评估—提升」里
+ * 评估这一步是空的，下次进来看到的还是同一份结论。
+ *
+ * <p>剧本按岗位挑第一本匹配的；没有匹配剧本时退回自由面试并说明原因，
+ * 而不是静默开一场不进曲线的练习。
+ */
 function practice(rec: TrendRecommendation) {
   const jobCode = trendPoints.value[trendPoints.value.length - 1]?.jobCode;
   const job = jobs.find((j) => j.id === jobCode) ?? jobs[0];
-  startSession(job.id, store.settings.personaId, "free");
-  notify(`已开始「${rec.label}」专项练习`);
+  // 首页与设置页的剧本都从 seedScripts 取（本项目没有远程剧本列表），这里同一口径
+  const script = seedScripts.find((s) => s.job_code === job.id);
+  if (!script) {
+    startSession(job.id, store.settings.personaId, "free");
+    notify(`该岗位暂无剧本，已用自由面试开始「${rec.label}」练习（本场不计入成长曲线）`);
+    router.push("/interview");
+    return;
+  }
+  // 与首页「剧本面试」同一条绑定路径：房间页靠 bondScript 把 script_id 落库
+  const interviewer = (script.interviewer_code as PersonaId | undefined) ?? store.settings.personaId;
+  localStorage.setItem("bondScript", script.code);
+  localStorage.setItem("bondCharacter", interviewer);
+  startSession(script.job_code ?? job.id, interviewer, "script");
+  notify(`已开始「${rec.label}」专项练习（剧本面试，本场会计入成长曲线）`);
   router.push("/interview");
 }
 
@@ -415,6 +475,7 @@ async function loadTrend() {
     trendPoints.value = view.points;
     requiredPoints.value = view.requiredPoints;
     recommendations.value = view.recommendations;
+    practicePlan.value = view.practicePlan ?? [];
   } catch (error) {
     console.warn("[records] 拉取成长曲线失败，暂不展示趋势", error);
   }
