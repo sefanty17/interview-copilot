@@ -12,6 +12,23 @@ function resolvePttBinding(): ShortcutBinding {
   return parsePttBinding(runtime.asrStore?.settings?.ptt_key) ?? { key: "f8" };
 }
 
+// ── 「开始录音前停掉正在播的 TTS」的回调（issue #10） ──
+//
+// 为什么不在这里直接 import 播放器：ASR 是低层组件（GameDialog 里用），播放器在
+// 房间页，反向依赖会形成环（房间页 → GameDialog → ptt → 房间页）。改成房间页启动时
+// 注册一个回调，ASR 只负责「该停了就喊一声」。
+let stopVoiceBeforeRecording: (() => void) | null = null;
+
+/**
+ * 注册「开始录音前停掉 TTS」的回调。
+ *
+ * <p>传 {@code null} 解除注册（房间页卸载时调用）。播放器本身没有在播时，
+ * 回调里调 {@code stop()} 是无害的空操作，所以这里不需要额外判断。
+ */
+export function setStopVoiceBeforeRecording(fn: (() => void) | null): void {
+  stopVoiceBeforeRecording = fn;
+}
+
 // ── 按住说话(PTT)快捷键 v2：auto_listen 模式关 = 长按 PTT / 单击 toggle 双语义；
 // 模式开 = 快捷键专职切换自动监听启用开关（只动运行态，不碰模式设置）。
 // 窗口内生效（/chat 与 /pet，路由门控在 chatActive）。
@@ -55,6 +72,9 @@ export function pttDown() {
       resetPtt();
       return;
     }
+    // 开始录音前先停掉正在播的 TTS（issue #10）：不停的话面试官的声音会被录进
+    // 候选人这一轮的输入里，识别结果里混进 AI 自己的话。
+    stopVoiceBeforeRecording?.();
     // 立即开始录音（不丢首字）；PTT_TAP_THRESHOLD_MS 内松开由 keyup 判定为
     // 单击，否则 keyup 时按长按结束
     void start("button").catch((err) => {

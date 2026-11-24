@@ -61,6 +61,13 @@
           <div class="h-full rounded-full bg-[#79d9ff] transition-all duration-500" :style="{ width: (scriptChapter ? scriptProgressPct : progress) + '%' }" />
         </div>
       </div>
+      <!-- 回复长度档位（issue #16 / A4）：只在自由对话显示，剧本节奏由剧本写死 -->
+      <ReplyLengthPicker
+        v-if="!isScript"
+        :model-value="replyLengthMode"
+        :busy="replyLengthSaving"
+        @update:model-value="changeReplyLengthMode"
+      />
       <button class="nav-btn" @click="endNow">结束面试</button>
       <button class="nav-btn" title="设置" @click="openSettings">
         <Icon :icon="'setting'" :size="18" />
@@ -132,9 +139,11 @@ import {
   createSession,
   fetchFreeState,
   fetchImpression,
+  fetchReplyLengthMode,
   fetchSessionDetail,
   finishSession,
   isBackendUp,
+  saveReplyLengthMode,
   sendMessage,
   startScript,
   submitScriptChoice,
@@ -142,6 +151,7 @@ import {
   type FreeState,
   type ImpressionView,
   type ReplyEvent,
+  type ReplyLengthMode,
   type SessionDetail,
   type StreamEvent,
   type VoiceEvent,
@@ -173,16 +183,25 @@ import {
   rememberActiveSession,
 } from "../store/mediaRestore";
 import Icon from "../components/base/widget/Icon.vue";
+import ReplyLengthPicker from "../components/game/ReplyLengthPicker.vue";
 import { applyPendingChoice, runScriptStream } from "../composables/useScriptRunner";
 import { applyImpression, resetImpression } from "../store/impressionStore";
 import { useVoicePlayback } from "../composables/useVoicePlayback";
+import { setStopVoiceBeforeRecording, setVoicePlaying } from "../composables/asr";
 import { cardForCode, ensureCharactersLoaded } from "../store/characters";
 
 const router = useRouter();
 const route = useRoute();
 
-/** AI 台词的语音播放器（单一 <audio> 复用；剧本台词的语音留到后续批次，本批不接） */
-const playback = useVoicePlayback();
+/**
+ * AI 台词的语音播放器（单一 `<audio>` 复用；剧本台词的语音留到后续批次，本批不接）。
+ *
+ * <p>回调把「正在播」同步给 ASR 门控：{@code setVoicePlaying(true)} 会停掉能量监测并
+ * 丢弃在飞的录音（那是在录 AI 的声音），播完再恢复监听。这一步是 issue #10
+ * 「按麦克风时朗读立即停止」的落点——<b>先停朗读</b>（由 stopWhenRecording 做），
+ * <b>再让门控知道此刻不该录</b>。
+ */
+const playback = useVoicePlayback((playing) => setVoicePlaying(playing));
 
 const historyOpen = ref(false);
 const finished = ref(false);
@@ -191,6 +210,56 @@ const elapsed = ref(0);
 
 /** 自由面试状态（后端识别出的岗位 + 当前题目）；剧本场次保持 null */
 const freeState = ref<FreeState | null>(null);
+
+/**
+ * 回复长度档位（issue #16 / A4）。
+ *
+ * <p>{@code null} = 还没读到（场次未建 / 试玩会话 / 后端不可用）。试玩会话后端返回
+ * {@code mode:null}，此时选择器按「正常」展示但不允许写——写入会被后端 409 拒掉。
+ */
+const replyLengthMode = ref<ReplyLengthMode | null>(null);
+const replyLengthSaving = ref(false);
+
+/** 读一次当前档位；失败静默（房间照常能聊，档位显示默认值）。 */
+async function loadReplyLengthMode(): Promise<void> {
+  const id = sessionId.value;
+  if (id === null) return;
+  try {
+    replyLengthMode.value = await fetchReplyLengthMode(id);
+  } catch (error) {
+    console.warn("[interview] 读取回复档位失败，按默认展示", error);
+    replyLengthMode.value = null;
+  }
+}
+
+/**
+ * 切档位：先乐观更新再发请求，失败回滚并提示。
+ *
+ * <p>乐观更新的理由是这个控件在聊天过程中高频使用，等一个往返再变会有明显迟滞；
+ * 失败时把原值还回去，用户看到提示能马上重试。
+ *
+ * <p>这里刻意<b>不用 watch 监听 replyLengthMode</b>：本方法自己会改这个 ref，
+ * 用 watch 会形成「改→请求→再改→再请求」的循环。选择器只 emit，落库在这里做。
+ */
+async function changeReplyLengthMode(next: ReplyLengthMode): Promise<void> {
+  const id = sessionId.value;
+  if (id === null || replyLengthSaving.value || next === replyLengthMode.value) return;
+  const previous = replyLengthMode.value;
+  replyLengthMode.value = next;
+  replyLengthSaving.value = true;
+  try {
+    replyLengthMode.value = await saveReplyLengthMode(id, next);
+  } catch (error) {
+    replyLengthMode.value = previous;
+    console.warn("[interview] 切换回复档位失败", error);
+    void alertDialog(
+      "切换回复档位失败",
+      error instanceof Error ? error.message : String(error),
+    );
+  } finally {
+    replyLengthSaving.value = false;
+  }
+}
 
 const persona = computed(() => findInterviewer(store.session.personaId));
 const job = computed(() => jobs.find((j) => j.id === store.session.jobId) ?? jobs[0]);
@@ -937,6 +1006,9 @@ let disposeAudio: (() => void) | undefined;
 onMounted(async () => {
   // 角色卡（显示层数据源）：懒加载一次即可，失败不拦房间演出
   void ensureCharactersLoaded();
+  // issue #10：开始录音前先停掉正在播的 TTS。注册回调而不是让 ASR 直接 import
+  // 播放器——ASR 在 GameDialog 里用，反向依赖会形成环。
+  setStopVoiceBeforeRecording(() => playback.stop());
   if (route.query.resume) resumeSession();
   // 直接访问 /interview（没有 session 内容）时兜底建一场，沿用已有 mode（缺省 free）
   if (!store.session.messages.length) {
@@ -968,6 +1040,8 @@ onMounted(async () => {
   if (online) {
     // 印象按场次存：刷新 / 重进时恢复面板，之后的更新走 ai:impression
     void refreshImpression();
+    // 回复档位跟场次走：刷新后右上角要显示上次选的档位，而不是默认「正常」
+    void loadReplyLengthMode();
     // 剧本模式：接剧本引擎（advance 链路）
     if (store.session.mode === "script") {
       await enterScriptScene();
@@ -997,6 +1071,9 @@ onBeforeUnmount(() => {
   if (pending) window.clearTimeout(pending);
   disposeViewport?.();
   disposeAudio?.();
+  // 先解除 ASR 的回调再释放播放器：顺序反过来的话，回调里拿到的可能是已经销毁的元素
+  setStopVoiceBeforeRecording(null);
+  setVoicePlaying(false);
   playback.dispose();
   delete (window as unknown as Record<string, unknown>).__setPresentRoles;
   resetRoom();
