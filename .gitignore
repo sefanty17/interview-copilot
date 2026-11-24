@@ -42,3 +42,7 @@ docs/课设材料/
 
 # 知识库导入脚本的本地指纹缓存（机器本地状态，不入库）
 data/knowledge/.knowledge-index.json
+
+# Python 字节码缓存（scripts/ 下的运维脚本跑一次就会生成）
+__pycache__/
+*.pyc
