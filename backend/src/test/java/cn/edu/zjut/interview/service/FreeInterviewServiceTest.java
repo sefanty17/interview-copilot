@@ -56,7 +56,8 @@ class FreeInterviewServiceTest {
         assertEquals("frontend", progress.jobCode());
         assertEquals("Web 前端", progress.jobName());
         assertNotNull(progress.question());
-        assertEquals(6, progress.questionCount());
+        // 不写死题量：题库会随 questions-h2.sql 扩题，断言「与该岗位实际条数一致」即可
+        assertEquals(bankSize("frontend"), progress.questionCount());
         assertEquals(1, progress.askedCount());
     }
 
@@ -81,17 +82,19 @@ class FreeInterviewServiceTest {
         FreeInterviewService.FreeProgress progress = freeInterviewService.prepare(session, "Java 后端开发", 1);
         assertEquals("java", progress.jobCode());
 
+        int bankSize = bankSize("java");
         Set<Long> seen = new HashSet<>();
         seen.add(progress.question().getId());
-        for (int i = 2; i <= 20; i++) {
-            progress = freeInterviewService.prepare(session, "继续", i);
+        // 每 TURNS_PER_QUESTION+1 次调用换一题，聊到覆盖整份题池为止（留足上限防死循环）
+        int guard = 0;
+        int round = 1;
+        while (seen.size() < bankSize && guard++ < bankSize * 10) {
+            progress = freeInterviewService.prepare(session, "继续", ++round);
             if (progress.question() != null) {
                 seen.add(progress.question().getId());
             }
         }
-        // java 题库 6 题：抽满一轮后才会重新开始，中间不重复
-        assertEquals(6, seen.size(), "一轮内不应重复出题");
-        assertEquals(6, questionRepository.findByJobCodeAndEnabledTrueOrderBySortOrderAscIdAsc("java").size());
+        assertEquals(bankSize, seen.size(), "一轮内不应重复出题，且应覆盖整份题池");
     }
 
     @Test
@@ -117,7 +120,7 @@ class FreeInterviewServiceTest {
         assertEquals("java", view.jobCode());
         assertEquals("Java 后端", view.jobName());
         assertEquals(1, view.askedCount());
-        assertEquals(6, view.questionCount());
+        assertEquals(bankSize("java"), view.questionCount());
         assertNotNull(view.question());
         assertEquals(session.getFreeCurrentQuestionId(), view.question().id());
         assertFalse(view.question().text().isEmpty());
@@ -146,6 +149,11 @@ class FreeInterviewServiceTest {
         // JavaScript 里的 java、django 里的 go 都不应该被当成关键词命中
         assertEquals("frontend", FreeInterviewService.detectJob("平时写 JavaScript 和 React"));
         assertEquals("python", FreeInterviewService.detectJob("Django 项目"));
+    }
+
+    /** 该岗位题库的实际条数：测试不写死数字，扩题时不用改用例。 */
+    private int bankSize(String jobCode) {
+        return questionRepository.findByJobCodeAndEnabledTrueOrderBySortOrderAscIdAsc(jobCode).size();
     }
 
     private InterviewSession freeSession(Long scriptId) {

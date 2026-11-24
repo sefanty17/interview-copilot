@@ -123,7 +123,8 @@ import ToolActivityStatus from "../components/tools/ToolActivityStatus.vue";
 import FullAccessWarning from "../components/tools/FullAccessWarning.vue";
 import { dimensionNames, questions as questionBank } from "../data/questions";
 import { jobs } from "../data/jobs";
-import type { InterviewRecord } from "../types/domain";
+import type { InterviewRecord, Question } from "../types/domain";
+import { fetchQuestions, type QuestionItem } from "../api/questions";
 import { findInterviewer } from "../store/interviewers";
 import { findScript } from "../data/scripts";
 import { alertDialog, confirmDialog } from "../store/dialogStore";
@@ -207,8 +208,49 @@ const card = computed(() => cardForCode(persona.value.code));
 const isScript = computed(() => store.session.mode === "script");
 
 /** 题库：先按知识点偏好排序、按题面去重。剧本面试截取 settings.questionCount 道 */
+
+/**
+ * 后端题库（issue #1）：取到就用它，取不到回退本地题池。
+ *
+ * <p>回退不能删：断网时整个房间仍然要能演示，本地题池是最后一道保险。
+ */
+const remoteQuestions = ref<Question[]>([]);
+
+/** 后端题 → 房间内部使用的 {@link Question} 形状（字段一一对应，只做 id 类型适配）。 */
+function toLocalQuestion(item: QuestionItem): Question {
+  return {
+    // 本地题池的 id 是字符串，后端给的是自增主键，统一转成字符串保持形状一致
+    id: item.code || String(item.id),
+    jobId: item.jobCode,
+    kp: item.kp ?? "",
+    type: item.type ?? "",
+    difficulty: item.difficulty ?? "中等",
+    text: item.text,
+    reference: item.reference ?? "",
+    followUps: item.followUps ?? [],
+  };
+}
+
+/** 切岗位时重新取题；请求失败或返回空都静默回落本地题池，不打断面试。 */
+let questionLoadSeq = 0;
+async function loadQuestions(jobId: string): Promise<void> {
+  const seq = ++questionLoadSeq;
+  try {
+    const items = await fetchQuestions(jobId, { limit: 100 });
+    // 迟到的旧请求直接丢弃，避免切岗位后又被上一个岗位的题覆盖
+    if (seq !== questionLoadSeq) return;
+    remoteQuestions.value = items.map(toLocalQuestion);
+  } catch (error) {
+    if (seq !== questionLoadSeq) return;
+    console.warn("[interview] 后端题库不可用，改用本地题池", error);
+    remoteQuestions.value = [];
+  }
+}
+
 const questionPool = computed(() => {
-  const all = questionBank.filter((q) => q.jobId === store.session.jobId);
+  const all = remoteQuestions.value.length
+    ? remoteQuestions.value
+    : questionBank.filter((q) => q.jobId === store.session.jobId);
   const preferred = all.filter((q) => store.settings.kps.includes(q.kp));
   const rest = all.filter((q) => !preferred.includes(q));
   // 题库去重：同一道题可能被不同知识点重复收录，按题面文本去掉重复
@@ -223,6 +265,15 @@ const questionPool = computed(() => {
   const target = Math.max(3, Math.min(8, store.settings.questionCount));
   return ordered.slice(0, target);
 });
+
+// 岗位确定或切换时取一次后端题库（immediate：直接进房间时 jobId 已存在）
+watch(
+  () => store.session.jobId,
+  (jobId) => {
+    if (jobId) void loadQuestions(jobId);
+  },
+  { immediate: true },
+);
 
 const progress = computed(() => {
   if (!isScript.value || !questionPool.value.length) return 0;
@@ -357,7 +408,7 @@ function anyKpName(id: string) {
   return id;
 }
 
-function feedbackFor(q: (typeof questionBank)[number], answer: string) {
+function feedbackFor(q: Question, answer: string) {
   const short = answer.trim().length < 26;
   if (short) {
     return "可以再展开一点吗？我想听到你的判断依据，而不只是结论。先说你的方案，再说为什么这样选、代价是什么。";
@@ -388,7 +439,7 @@ function askOpeningQuestion() {
 }
 
 /** 一轮 AI 回复：点评一句 + 下一问一句（单句推进，逐句 ▼） */
-function runAiTurn(q: (typeof questionBank)[number] | undefined, answer: string) {
+function runAiTurn(q: Question | undefined, answer: string) {
   if (finished.value) return;
   const short = answer.trim().length < 26;
   const first = roomStore.lines.length;
@@ -795,7 +846,7 @@ async function finish() {
   const tooShort = answeredTurns < 3;
   const total = tooShort ? 0 : Math.max(1, answeredTurns);
   // 题库不再循环，实际问过的就是前 answeredTurns 道
-  const answered = pool.slice(0, total).filter((q): q is (typeof questionBank)[number] => !!q);
+  const answered = pool.slice(0, total).filter((q): q is Question => !!q);
   const base = 79 + (answered.length % 4);
   const dims = dimensionNames.map((name, i) => ({
     name,
