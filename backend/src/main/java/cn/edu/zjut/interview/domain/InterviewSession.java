@@ -98,6 +98,25 @@ public class InterviewSession {
     @Column(name = "media_state", columnDefinition = "CLOB")
     private String mediaState;
 
+    /**
+     * 自由面试：面试官从候选人自述里识别出的岗位编码（对应 interview_question.job_code）。
+     * 剧本场次恒为 NULL。
+     */
+    @Column(name = "free_job_code", length = 32)
+    private String freeJobCode;
+
+    /** 自由面试：当前正在聊的题目 id；还没识别出岗位时为 NULL。 */
+    @Column(name = "free_current_question_id")
+    private Long freeCurrentQuestionId;
+
+    /** 自由面试：本场已经问过的题目 id，逗号分隔（抽题时排除，避免重复）。 */
+    @Column(name = "free_asked_question_ids", length = 1024)
+    private String freeAskedQuestionIds;
+
+    /** 自由面试：当前题目已经被追问了几轮；到上限后换下一题。 */
+    @Column(name = "free_question_turns")
+    private Integer freeQuestionTurns = 0;
+
     public Long getId() {
         return id;
     }
@@ -248,5 +267,37 @@ public class InterviewSession {
 
     public void setMediaState(String mediaState) {
         this.mediaState = mediaState;
+    }
+
+    public String getFreeJobCode() {
+        return freeJobCode;
+    }
+
+    public void setFreeJobCode(String freeJobCode) {
+        this.freeJobCode = freeJobCode;
+    }
+
+    public Long getFreeCurrentQuestionId() {
+        return freeCurrentQuestionId;
+    }
+
+    public void setFreeCurrentQuestionId(Long freeCurrentQuestionId) {
+        this.freeCurrentQuestionId = freeCurrentQuestionId;
+    }
+
+    public String getFreeAskedQuestionIds() {
+        return freeAskedQuestionIds;
+    }
+
+    public void setFreeAskedQuestionIds(String freeAskedQuestionIds) {
+        this.freeAskedQuestionIds = freeAskedQuestionIds;
+    }
+
+    public Integer getFreeQuestionTurns() {
+        return freeQuestionTurns;
+    }
+
+    public void setFreeQuestionTurns(Integer freeQuestionTurns) {
+        this.freeQuestionTurns = freeQuestionTurns;
     }
 }

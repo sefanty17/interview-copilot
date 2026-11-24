@@ -3,6 +3,8 @@ package cn.edu.zjut.interview.api;
 import cn.edu.zjut.interview.domain.InterviewMessage;
 import cn.edu.zjut.interview.dto.CreateSessionRequest;
 import cn.edu.zjut.interview.dto.CreateSessionResponse;
+import cn.edu.zjut.interview.dto.FreeStateView;
+import cn.edu.zjut.interview.dto.ImpressionView;
 import cn.edu.zjut.interview.dto.SessionDetailView;
 import cn.edu.zjut.interview.dto.SessionFinishView;
 import cn.edu.zjut.interview.dto.SessionMessageView;
@@ -15,6 +17,8 @@ import cn.edu.zjut.interview.repository.InterviewEvaluationRepository;
 import cn.edu.zjut.interview.repository.InterviewMessageRepository;
 import cn.edu.zjut.interview.repository.InterviewSessionRepository;
 import cn.edu.zjut.interview.service.ChatService;
+import cn.edu.zjut.interview.service.FreeInterviewService;
+import cn.edu.zjut.interview.service.ImpressionService;
 import cn.edu.zjut.interview.summary.SummaryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +63,8 @@ public class SessionController {
     private final InterviewEvaluationRepository evaluationRepository;
     private final InterviewEvaluationDimensionRepository dimensionRepository;
     private final SummaryService summaryService;
+    private final FreeInterviewService freeInterviewService;
+    private final ImpressionService impressionService;
 
     public SessionController(ChatService chatService,
                              InterviewEngine engine,
@@ -67,7 +73,9 @@ public class SessionController {
                              InterviewMessageRepository messageRepository,
                              InterviewEvaluationRepository evaluationRepository,
                              InterviewEvaluationDimensionRepository dimensionRepository,
-                             SummaryService summaryService) {
+                             SummaryService summaryService,
+                             FreeInterviewService freeInterviewService,
+                             ImpressionService impressionService) {
         this.chatService = chatService;
         this.engine = engine;
         this.engineExecutor = engineExecutor;
@@ -76,6 +84,8 @@ public class SessionController {
         this.evaluationRepository = evaluationRepository;
         this.dimensionRepository = dimensionRepository;
         this.summaryService = summaryService;
+        this.freeInterviewService = freeInterviewService;
+        this.impressionService = impressionService;
     }
 
     @PostMapping
@@ -88,13 +98,31 @@ public class SessionController {
         return engine.detail(id);
     }
 
+    /**
+     * 自由面试状态（issue #11）：识别出的岗位 + 当前题目 + 题数。
+     * 刷新 / 重进房间时用它恢复抬头；剧本场次返回 {@code free=false}。
+     */
+    @GetMapping("/{id}/free-state")
+    public FreeStateView freeState(@PathVariable Long id) {
+        return freeInterviewService.state(id);
+    }
+
+    /**
+     * 面试印象（正面六维 + 负面六维）。刷新 / 重进房间时恢复雷达图；
+     * 还没评估过时返回全 0 且 {@code evaluated=false}。
+     */
+    @GetMapping("/{id}/impression")
+    public ImpressionView impression(@PathVariable Long id) {
+        return impressionService.state(id);
+    }
+
     @GetMapping
     public List<SessionSummaryView> list(@RequestParam(required = false) String status) {
         return engine.list(status);
     }
 
     /**
-     * 删除一场面试：先清台词、评估维度、评估，再删场次本身，避免外键悬空。
+     * 删除一场面试：先清台词、评估维度、评估、印象，再删场次本身，避免外键悬空。
      * 记录页的单个删除 / 批量删除都走这里。
      */
     @DeleteMapping("/{id}")
@@ -105,6 +133,7 @@ public class SessionController {
         }
         dimensionRepository.deleteBySessionId(id);
         evaluationRepository.deleteBySessionId(id);
+        impressionService.deleteBySessionId(id);
         summaryService.deleteBySessionId(id);
         List<InterviewMessage> messages = messageRepository.findBySessionIdOrderBySeqAsc(id);
         if (!messages.isEmpty()) {
