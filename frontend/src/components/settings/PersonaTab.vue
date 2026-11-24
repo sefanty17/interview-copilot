@@ -139,7 +139,8 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import MenuItem from "./MenuItem.vue";
-import { avatarUrl, interviewers, type Interviewer } from "../../data/interviewers";
+import { avatarUrl, type Interviewer } from "../../data/interviewers";
+import { interviewers } from "../../store/interviewers";
 import { setPersona, store, notify, currentJob } from "../../store/appStore";
 
 const router = useRouter();

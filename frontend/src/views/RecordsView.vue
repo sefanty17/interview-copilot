@@ -210,7 +210,7 @@ import MenuItem from "../components/settings/MenuItem.vue";
 import LineChart from "../components/ui/LineChart.vue";
 import { jobs } from "../data/jobs";
 import type { InterviewRecord } from "../types/domain";
-import { findInterviewer } from "../data/interviewers";
+import { findInterviewer } from "../store/interviewers";
 import { confirmDialog } from "../store/dialogStore";
 import { notify, persist, startSession, store } from "../store/appStore";
 import { deleteSession, fetchSessions, isBackendUp, type SessionSummary } from "../api/chat";

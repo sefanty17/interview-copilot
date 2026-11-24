@@ -266,7 +266,7 @@ import PageShell from "../components/ui/PageShell.vue";
 import MenuItem from "../components/settings/MenuItem.vue";
 import RadarChart from "../components/ui/RadarChart.vue";
 import { jobs } from "../data/jobs";
-import { findInterviewer } from "../data/interviewers";
+import { findInterviewer } from "../store/interviewers";
 import { store } from "../store/appStore";
 import { fetchEvaluation, runEvaluation, type EvaluationResult } from "../api/evaluation";
 import { fetchSummary, runSummary, type DialogueSummary } from "../api/summary";

@@ -123,7 +123,7 @@ function createSave() {
   store.records.unshift({
     id: `r-${Date.now()}`,
     jobName: name,
-    personaName: `${currentPersona.value.name} · ${currentPersona.value.title}`,
+    personaName: `${currentPersona.value.name} · ${currentPersona.value.displayRole}`,
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
     duration: "00 分 00 秒",
     score: 0,

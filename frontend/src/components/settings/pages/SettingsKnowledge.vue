@@ -83,29 +83,51 @@
         </div>
       </MenuItem>
 
-      <!-- ========== 试搜 ========== -->
-      <MenuItem title="试搜">
+      <!-- ========== 搜索 ========== -->
+      <MenuItem title="搜索">
         <template #header>
           <Search :size="20" />
         </template>
 
         <div class="flex w-full flex-col gap-3">
+          <input
+            v-model="query"
+            class="glass-input w-full"
+            placeholder="输入一个问题，看看会命中哪些片段"
+            @keydown.enter="runSearch"
+          />
           <div class="flex items-center gap-2">
-            <input
-              v-model="query"
-              class="glass-input flex-1"
-              placeholder="输入一个问题，看看会命中哪些片段"
-              @keydown.enter="runSearch"
-            />
-            <select v-model="mode" class="glass-input w-32 cursor-pointer">
-              <option value="hybrid">hybrid</option>
-              <option value="bm25">bm25</option>
-              <option value="vector">vector</option>
+            <select
+              v-model="scope"
+              class="glass-input shrink-0 cursor-pointer"
+              style="width: 5.5rem"
+              title="检索范围：按语料岗位过滤"
+            >
+              <option value="">全部</option>
+              <option value="java">Java</option>
+              <option value="frontend">前端</option>
             </select>
-            <button class="btn-sm shrink-0" :disabled="searching || !query.trim()" @click="runSearch">
-              {{ searching ? "检索中..." : "检索" }}
+            <select
+              v-model="mode"
+              class="glass-input shrink-0 cursor-pointer"
+              style="width: 6rem"
+              title="混合 = 向量 + 关键词融合；关键词 = 纯字面匹配；语义 = 纯向量"
+            >
+              <option value="hybrid">混合</option>
+              <option value="bm25">关键词</option>
+              <option value="vector">语义</option>
+            </select>
+            <button
+              class="btn-sm ml-auto shrink-0"
+              :disabled="searching || !query.trim()"
+              @click="runSearch"
+            >
+              {{ searching ? "检索中..." : "搜索" }}
             </button>
           </div>
+          <p class="text-[11px] leading-relaxed text-white/35">
+            范围按语料岗位过滤；模式里「关键词」适合查专有名词，「语义」适合换种说法，「混合」两者取长补短（默认）。
+          </p>
 
           <p v-if="result" class="text-[11px] text-white/40">
             检索范围 {{ result.scopeSize }} 个片段
@@ -256,9 +278,11 @@ const submit = async () => {
   }
 };
 
-// ---------- 试搜 ----------
+// ---------- 搜索 ----------
 
 const query = ref("");
+/** 检索范围：空串 = 全部岗位，否则按语料 category 过滤 */
+const scope = ref<"" | "java" | "frontend">("");
 const mode = ref<"hybrid" | "bm25" | "vector">("hybrid");
 const searching = ref(false);
 const result = ref<KnowledgeSearchResult | null>(null);
@@ -268,7 +292,10 @@ const runSearch = async () => {
   if (!q || searching.value) return;
   searching.value = true;
   try {
-    result.value = await searchKnowledge(q, { mode: mode.value });
+    result.value = await searchKnowledge(q, {
+      mode: mode.value,
+      jobCode: scope.value || undefined,
+    });
   } catch (e) {
     result.value = null;
     void alertDialog("检索失败", e instanceof Error ? e.message : String(e));

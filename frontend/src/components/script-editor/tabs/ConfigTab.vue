@@ -15,7 +15,7 @@ import FieldRow from "../fields/FieldRow.vue";
 import { saveStoryConfig, store } from "../../../store/scriptEditor";
 import type { FieldSpec, StoryConfig } from "../../../api/editor";
 import { jobs } from "../../../data/jobs";
-import { interviewers } from "../../../data/interviewers";
+import { interviewers } from "../../../store/interviewers";
 
 /** 本页可编辑的四个 story_config 键（后端 writeConfig 认的键之一部分） */
 const CONFIG_KEYS = ["script_name", "description", "recommand_start", "intro_chapter"] as const;

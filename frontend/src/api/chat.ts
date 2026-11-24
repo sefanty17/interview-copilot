@@ -117,6 +117,68 @@ export interface SessionDetail {
   mediaState: SessionMediaState | null;
 }
 
+/** 自由面试当前题目（后端 `interview_question` 的展示字段，不含参考要点）。 */
+export interface FreeQuestion {
+  id: number;
+  kp: string;
+  type: string;
+  difficulty: string;
+  text: string;
+}
+
+/**
+ * 自由面试状态（后端 `FreeStateView`，issue #11）。
+ *
+ * `GET /api/sessions/{id}/free-state` 与 SSE `ai:question` 的 data 是同一个结构，
+ * 后者多一个 `changed`（本次是否换了岗位 / 换了题）。
+ */
+export interface FreeState {
+  free: boolean;
+  jobCode: string | null;
+  jobName: string | null;
+  /** 本场已抽中的题目数（含正在聊的这道） */
+  askedCount: number;
+  /** 该岗位题库总数 */
+  questionCount: number;
+  question: FreeQuestion | null;
+  changed?: boolean;
+}
+
+/** 自由面试状态：刷新 / 重进房间时恢复「岗位 + 第几题」抬头。 */
+export async function fetchFreeState(sessionId: number): Promise<FreeState> {
+  const response = await fetch(`/api/sessions/${sessionId}/free-state`);
+  if (!response.ok) {
+    throw new Error(`fetchFreeState 失败：HTTP ${response.status}`);
+  }
+  return (await response.json()) as FreeState;
+}
+
+/**
+ * 面试印象（后端 `ImpressionView`）：`GET /api/sessions/{id}/impression`
+ * 与 SSE `ai:impression` 的 data 是同一个结构。
+ *
+ * <p>正面 / 负面各六维，`*Deltas` 是本次评估的增量，`reason` 是评估依据。
+ */
+export interface ImpressionView {
+  roleId: number;
+  evaluated: boolean;
+  evaluatedUserCount: number;
+  positive: Record<string, number>;
+  negative: Record<string, number>;
+  positiveDeltas: Record<string, number>;
+  negativeDeltas: Record<string, number>;
+  reason: string;
+}
+
+/** 面试印象：刷新 / 重进房间时恢复（未评估时六维全 0 且 evaluated=false）。 */
+export async function fetchImpression(sessionId: number): Promise<ImpressionView> {
+  const response = await fetch(`/api/sessions/${sessionId}/impression`);
+  if (!response.ok) {
+    throw new Error(`fetchImpression 失败：HTTP ${response.status}`);
+  }
+  return (await response.json()) as ImpressionView;
+}
+
 /** `script:narration` 的 data（字段名照抄后端 SseEventSink，不许改）。 */
 export interface ScriptNarrationEvent {
   text: string;

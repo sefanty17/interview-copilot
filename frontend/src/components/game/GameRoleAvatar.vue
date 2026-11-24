@@ -20,7 +20,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import StaticRolePresentation from "./StaticRolePresentation.vue";
-import { findInterviewer } from "../../data/interviewers";
+import { findInterviewer } from "../../store/interviewers";
 import { avatarObjectFit, standardAvatarStyle } from "../../utils/avatar-layout";
 import { useRoleAvatar, type AvatarRole } from "../../composables/role/useRoleAvatar";
 import { roomStore } from "../../store/roomStore";

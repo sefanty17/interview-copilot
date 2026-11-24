@@ -373,7 +373,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { avatarUrl, findInterviewer } from "../../../data/interviewers";
+import { avatarUrl } from "../../../data/interviewers";
+import { findInterviewer } from "../../../store/interviewers";
 import { loadRoleSettings, saveRoleSettings, type RoleSettings } from "../../../store/roleEditor";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
 import { notify } from "../../../store/appStore";

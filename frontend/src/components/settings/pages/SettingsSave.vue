@@ -282,7 +282,7 @@ function handleCreateSave(): void {
   const record: SaveRecord = {
     id: `r-${Date.now()}`,
     jobName: currentJob.value.name,
-    personaName: `${currentPersona.value.name} · ${currentPersona.value.title}`,
+    personaName: `${currentPersona.value.name} · ${currentPersona.value.displayRole}`,
     date: nowDate(),
     duration: formatDuration(store.session.elapsed),
     score: 0,

@@ -83,20 +83,20 @@
               >
                 <!-- 只显示当前面试官；切换时旧内容淡出、新内容淡入（雷达子组件随 key 重挂载） -->
                 <Transition name="affection-role" mode="out-in">
-                  <div :key="persona?.id ?? 'none'">
+                  <div :key="persona?.code ?? 'none'">
                     <template v-if="affection">
                       <!-- 面试官头部：头像位 + 名字 + 平均值大数字 + 档位徽章 -->
                       <div class="flex items-center gap-2.5">
                         <div
                           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-base font-bold"
                         >
-                          {{ persona?.avatar ?? "" }}
+                          {{ personaInitial }}
                         </div>
                         <div class="min-w-0 flex-1">
                           <div class="truncate text-base font-semibold">
                             {{ persona?.name ?? "—" }}
                           </div>
-                          <div class="text-[11px] text-white/50">六维平均</div>
+                          <div class="text-[11px] text-white/50">综合印象</div>
                         </div>
                         <div class="flex shrink-0 flex-col items-end gap-1">
                           <span
@@ -118,14 +118,14 @@
                         </div>
                       </div>
 
-                      <!-- 当前负面情绪：由负面六维派生（强度 > 30 的维度），暗红系芯片 -->
+                      <!-- 当前负面观感：由负面六维派生（强度 > 30 的维度），暗红系芯片 -->
                       <div
                         v-if="negativeChips.length > 0"
                         class="mt-2.5 flex flex-wrap items-center gap-1.5"
                       >
                         <span class="flex items-center gap-1 text-[11px] text-white/50">
                           <CloudRain :size="11" />
-                          当前负面情绪
+                          当前负面观感
                         </span>
                         <span
                           v-for="chip in negativeChips"
@@ -156,13 +156,13 @@
                         class="mt-2 text-right text-xs"
                         :style="{ color: tierColor }"
                       >
-                        已抵达满溢
+                        已给出强烈推荐
                       </div>
 
-                      <!-- 双雷达：左好感 / 右负面；窄屏上下堆叠（窗口内容区可滚动） -->
+                      <!-- 双雷达：左正面印象 / 右负面观感；窄屏上下堆叠（窗口内容区可滚动） -->
                       <div class="mt-1 flex flex-col gap-1 md:flex-row md:gap-3">
                         <AffectionRadar
-                          title="好感维度"
+                          title="正面印象"
                           :values="affectionValues"
                           :labels="affectionLabels"
                           :descs="affectionDescs"
@@ -170,7 +170,7 @@
                         />
                         <AffectionRadar
                           v-if="negative"
-                          title="负面情绪"
+                          title="负面观感"
                           :values="negativeValues"
                           :labels="negativeLabels"
                           :descs="negativeDescs"
@@ -248,15 +248,14 @@
                             >：{{ NEG_DESCS[dim.key] }}
                           </div>
                           <div class="mt-1">
-                            面试印象由 AI 定期自动评估对话后调整，无需手动操作。
+                            面试印象由 AI 每 3 条回答评估一次，记在「本场面试 + 当前面试官」下，不需要手动操作。
                           </div>
-                          <div>数值跟随面试官保存，跨存档共享，不随存档回滚。</div>
+                          <div>新开一场面试会从「待观察」重新开始，不继承上一场。</div>
                           <div>
-                            数值允许溢出：超过 100 为「满溢」，雷达图顶点发光；低于 0
-                            为「疏离」，以冷色显示。
+                            正面六维越高代表面试官越认可；负面观感是面试官当下的疑虑，回答到点上会自行消解。
                           </div>
                           <div>
-                            负面情绪分六个维度，被冒犯或伤害时累积、安抚后消解；任一维度过强都会影响面试官的态度与语气。
+                            任一维度的负面观感过强，都会影响面试官追问的方向与语气。
                           </div>
                         </div>
                       </Transition>
@@ -280,13 +279,13 @@ import AffectionRadar from "./AffectionRadar.vue";
 import type { RadarPalette } from "./AffectionRadar.vue";
 import HeartLiquid from "./HeartLiquid.vue";
 import {
-  affectionAverage,
-  affectionStore,
+  impressionAverage,
+  impressionStore,
   negativePeak,
-  type AffectionVector,
+  type ImpressionVector,
   type NegativeVector,
-} from "../../store/affectionStore";
-import { personas } from "../../data/personas";
+} from "../../store/impressionStore";
+import { findInterviewer } from "../../store/interviewers";
 import { store } from "../../store/appStore";
 
 /** 心跳/波浪动画（当前常开；接入高级设置后由设置项控制） */
@@ -311,89 +310,92 @@ const onResize = () => {
 onMounted(() => window.addEventListener("resize", onResize));
 onUnmounted(() => window.removeEventListener("resize", onResize));
 
-const persona = computed(() => personas.find((p) => p.id === store.session.personaId));
-const affection = computed(() => affectionStore.dims);
-const negative = computed(() => affectionStore.negDims);
+const persona = computed(() => findInterviewer(store.session.personaId));
+/** 头像位没有图片资源时用名字首字做占位（原 personas 的 avatar 字段已随合并删除） */
+const personaInitial = computed(() => persona.value?.name?.slice(0, 1) ?? "");
+/** 未评估前面板显示「暂无数据」，不要把全 0 画成雷达 */
+const affection = computed(() => (impressionStore.evaluated ? impressionStore.dims : null));
+const negative = computed(() => (impressionStore.evaluated ? impressionStore.negDims : null));
 
-type DimKey = keyof AffectionVector;
+type DimKey = keyof ImpressionVector;
 const dimensions: { key: DimKey }[] = [
-  { key: "fondness" },
-  { key: "trust" },
-  { key: "intimacy" },
-  { key: "rapport" },
-  { key: "interest" },
-  { key: "longing" },
+  { key: "professionalism" },
+  { key: "clarity" },
+  { key: "logic" },
+  { key: "depth" },
+  { key: "credibility" },
+  { key: "potential" },
 ];
 type NegDimKey = keyof NegativeVector;
 const negDimensions: { key: NegDimKey }[] = [
-  { key: "anger" },
-  { key: "hurt" },
+  { key: "skepticism" },
+  { key: "confusion" },
+  { key: "impatience" },
   { key: "disappointment" },
-  { key: "indifference" },
-  { key: "jealousy" },
-  { key: "estrangement" },
+  { key: "wariness" },
+  { key: "reservation" },
 ];
 
-// ── 文案（取自原版 zh-CN 语言包 ui.affection，好感度→面试印象 / 角色→面试官） ──
+// ── 文案：面试官真正在判断的六个方向 + 六种负面观感 ──
 const DIM_LABELS: Record<DimKey, string> = {
-  fondness: "好感",
-  trust: "信赖",
-  intimacy: "亲密",
-  rapport: "默契",
-  interest: "兴趣",
-  longing: "思念",
+  professionalism: "专业性",
+  clarity: "表达力",
+  logic: "逻辑性",
+  depth: "深度",
+  credibility: "可信度",
+  potential: "潜力",
 };
 const DIM_DESCS: Record<DimKey, string> = {
-  fondness: "整体喜欢程度，影响语气甜度",
-  trust: "倾诉深度、说真心话的程度",
-  intimacy: "肢体接触与近距离描写的接受度",
-  rapport: "接梗、理解言外之意的程度",
-  interest: "对求职者话题的好奇心、主动提问的倾向",
-  longing: "久别重逢的反应强度",
+  professionalism: "基础是否扎实，概念、术语与结论是否准确",
+  clarity: "能否讲清楚，结构是否清楚，有没有把控好时长",
+  logic: "拆解问题的顺序、因果与取舍是否站得住",
+  depth: "是否讲到原理、边界与权衡，而不是只背结论",
+  credibility: "经历与回答是否自洽，不夸大，不会就说不会",
+  potential: "学习能力、反思能力与可塑性",
 };
 const NEG_LABELS: Record<NegDimKey, string> = {
-  anger: "愤怒",
-  hurt: "受伤",
+  skepticism: "质疑",
+  confusion: "困惑",
+  impatience: "不耐",
   disappointment: "失望",
-  indifference: "冷漠",
-  jealousy: "嫉妒",
-  estrangement: "疏远",
+  wariness: "戒备",
+  reservation: "顾虑",
 };
 const NEG_DESCS: Record<NegDimKey, string> = {
-  anger: "被冒犯时的怒气强度",
-  hurt: "被伤害后的在意程度",
-  disappointment: "期待落空累积的失望",
-  indifference: "心灰意冷时的冷淡程度",
-  jealousy: "吃醋与占有欲被触发的程度",
-  estrangement: "想要疏远求职者的倾向",
+  skepticism: "技术结论明显站不住，面试官想当场反驳",
+  confusion: "面试官听不懂你的思路，需要反复追问",
+  impatience: "绕圈、跑题、抓不住重点",
+  disappointment: "该会的基础题没答出来，低于预期",
+  wariness: "像在背题、套模板、经历注水",
+  reservation: "面试官在犹豫要不要让你过，亮点不够或有硬伤",
 };
 const TIER_LABELS = {
-  estranged: "疏离",
-  acquainted: "初识",
-  plain: "平淡",
-  familiar: "熟络",
-  deep: "深厚",
-  blazing: "炽烈",
-  overflow: "满溢",
+  estranged: "明确否决",
+  acquainted: "待观察",
+  plain: "偏弱",
+  familiar: "一般",
+  deep: "合格",
+  blazing: "良好",
+  overflow: "强烈推荐",
 } as const;
 
 // ── 雷达图输入（labels/descs 随界面语言重算；values 数组重建驱动子组件补间） ──
 const affectionValues = computed<number[]>(() => {
   const a = affection.value;
   if (!a) return [0, 0, 0, 0, 0, 0];
-  return [a.fondness, a.trust, a.intimacy, a.rapport, a.interest, a.longing];
+  return [a.professionalism, a.clarity, a.logic, a.depth, a.credibility, a.potential];
 });
 const negativeValues = computed<number[]>(() => {
   const n = negative.value;
   if (!n) return [0, 0, 0, 0, 0, 0];
-  return [n.anger, n.hurt, n.disappointment, n.indifference, n.jealousy, n.estrangement];
+  return [n.skepticism, n.confusion, n.impatience, n.disappointment, n.wariness, n.reservation];
 });
 const affectionLabels = computed(() => dimensions.map((d) => DIM_LABELS[d.key]));
 const affectionDescs = computed(() => dimensions.map((d) => DIM_DESCS[d.key]));
 const negativeLabels = computed(() => negDimensions.map((d) => NEG_LABELS[d.key]));
 const negativeDescs = computed(() => negDimensions.map((d) => NEG_DESCS[d.key]));
 
-/** 好感雷达：粉色系 */
+/** 正面印象雷达：粉色系 */
 const affectionPalette: RadarPalette = {
   gradientFrom: "#ff5c8a",
   gradientTo: "#ff9ec7",
@@ -404,7 +406,7 @@ const affectionPalette: RadarPalette = {
   glow: "rgba(255, 92, 138, 0.9)",
   cold: "#7fc4ff",
 };
-/** 负面雷达：暗红/玫红/暗紫系 */
+/** 负面观感雷达：暗红/玫红/暗紫系 */
 const negativePalette: RadarPalette = {
   gradientFrom: "#e0416e",
   gradientTo: "#7c5cbf",
@@ -417,7 +419,7 @@ const negativePalette: RadarPalette = {
 };
 
 // ── 平均值与档位 ─────────────────────────────────────
-const average = computed(() => affectionAverage.value);
+const average = computed(() => impressionAverage.value);
 
 const TIER_ORDER = [
   "estranged",
@@ -429,15 +431,15 @@ const TIER_ORDER = [
   "overflow",
 ] as const;
 type TierKey = (typeof TIER_ORDER)[number];
-/** 各档位下限：疏离 <0 / 初识 0-20 / 平淡 21-40 / 熟络 41-60 / 深厚 61-80 / 炽烈 81-100 / 满溢 >100 */
+/** 各档位下限（综合印象 0-100）：明确否决 0-19 / 待观察 20-39 / 偏弱 40-54 / 一般 55-69 / 合格 70-79 / 良好 80-89 / 强烈推荐 90-100 */
 const TIER_FLOOR: Record<TierKey, number> = {
-  estranged: Number.NEGATIVE_INFINITY,
-  acquainted: 0,
-  plain: 21,
-  familiar: 41,
-  deep: 61,
-  blazing: 81,
-  overflow: 101,
+  estranged: 0,
+  acquainted: 20,
+  plain: 40,
+  familiar: 55,
+  deep: 70,
+  blazing: 80,
+  overflow: 90,
 };
 const TIER_COLORS: Record<TierKey, string> = {
   estranged: "#7fc4ff",
@@ -452,12 +454,12 @@ const TIER_COLORS: Record<TierKey, string> = {
 const tier = computed<TierKey | null>(() => {
   const v = average.value;
   if (v === null) return null;
-  if (v < 0) return "estranged";
-  if (v <= 20) return "acquainted";
-  if (v <= 40) return "plain";
-  if (v <= 60) return "familiar";
-  if (v <= 80) return "deep";
-  if (v <= 100) return "blazing";
+  if (v < 20) return "estranged";
+  if (v < 40) return "acquainted";
+  if (v < 55) return "plain";
+  if (v < 70) return "familiar";
+  if (v < 80) return "deep";
+  if (v < 90) return "blazing";
   return "overflow";
 });
 const tierColor = computed(() => (tier.value ? TIER_COLORS[tier.value] : "#ff9ec7"));
@@ -466,7 +468,7 @@ const tierBadgeStyle = computed(() => {
   return { color: c, borderColor: `${c}80`, background: `${c}1f` };
 });
 
-// ── 爱心心跳：心动周期随好感平均值加快（无数据 1.8s → 满溢 0.7s） ──
+// ── 爱心心跳：心动周期随综合印象加快（无数据 1.8s → 满分 0.7s） ──
 const heartbeatStyle = computed(() => {
   const v = average.value;
   const duration = v === null ? 1.8 : Math.min(2.2, Math.max(0.7, 1.9 - v / 125));
@@ -480,13 +482,12 @@ const nextTierInfo = computed((): { key: TierKey; points: number; progress: numb
   if (v === null || t === null || t === "overflow") return null;
   const nextKey = TIER_ORDER[TIER_ORDER.indexOf(t) + 1];
   const need = TIER_FLOOR[nextKey];
-  // 疏离档以当前负值为进度起点，其余档以本档下限为起点
-  const start = t === "estranged" ? v : TIER_FLOOR[t];
+  const start = TIER_FLOOR[t];
   const progress = Math.min(100, Math.max(0, ((v - start) / (need - start)) * 100));
   return { key: nextKey, points: Math.max(0, need - v), progress };
 });
 
-// ── 当前负面情绪 chips：强度 > 30 的负面维度 ──
+// ── 当前负面观感 chips：强度 > 30 的负面维度 ──
 const negativeChips = computed(() => {
   const n = negative.value;
   if (!n) return [];
@@ -495,9 +496,9 @@ const negativeChips = computed(() => {
     .map((d) => ({ key: d.key, value: Math.round(n[d.key]) }));
 });
 
-// ── 最近一次评估变化（好感增量 + 负面增量） ──
+// ── 最近一次评估变化（正面增量 + 负面增量） ──
 const recentChange = computed(() => {
-  const c = affectionStore.lastChange;
+  const c = impressionStore.lastChange;
   if (!c) return null;
   const entries = dimensions
     .filter((d) => typeof c.deltas[d.key] === "number" && c.deltas[d.key] !== 0)

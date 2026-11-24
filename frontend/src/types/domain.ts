@@ -403,7 +403,7 @@ export interface SiteSettings {
 }
 
 /** 单条面试印象变化记录 */
-export interface AffectionHistoryEntry {
+export interface ImpressionHistoryEntry {
   time: string;
   /** 本次变化量（正=印象变好，负=变差） */
   delta: number;

@@ -339,7 +339,8 @@ import LcModal from "../../ui/LcModal.vue";
 import AdventurePanel from "./Adeventure/AdventurePanel.vue";
 import type { InterviewScript } from "../../../data/scripts";
 import { seedScripts, findScript } from "../../../data/scripts";
-import { interviewers, findInterviewer, avatarUrl, type InterviewerCode } from "../../../data/interviewers";
+import { avatarUrl, type InterviewerCode } from "../../../data/interviewers";
+import { interviewers, findInterviewer } from "../../../store/interviewers";
 import { importScriptZip, ScriptImportError, type ImportResult } from "../../../api/scripts";
 import {
   createScript,

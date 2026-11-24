@@ -220,7 +220,8 @@ import CharacterCard from "../../ui/Menu/CharacterCard.vue";
 import RoleArchiveProgress from "../../ui/RoleArchiveProgress.vue";
 import NewCharacterModal from "../character/NewCharacterModal.vue";
 import SettingsCharacterInfo from "./SettingsCharacterInfo.vue";
-import { avatarUrl, findInterviewer, interviewers, type Interviewer } from "../../../data/interviewers";
+import { avatarUrl, type Interviewer } from "../../../data/interviewers";
+import { interviewers, findInterviewer } from "../../../store/interviewers";
 import { clearSession, notify, setPersona, store } from "../../../store/appStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
 import {

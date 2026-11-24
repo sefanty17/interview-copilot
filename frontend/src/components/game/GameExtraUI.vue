@@ -14,7 +14,7 @@
       <!-- 剧本图片浮层（script:present-pic，空串 = 不显示） -->
       <ScriptPicDisplay />
     </template>
-    <!-- 面试印象变化飘出标签（affectionStore.lastChange 驱动，瞬时出现，保留） -->
+    <!-- 面试印象变化飘出标签（impressionStore.lastChange 驱动，瞬时出现，保留） -->
     <AffectionChangeFloat />
     <!-- 左下角声效面板（自由模式同样需要，保留） -->
     <SoundEffectPanel />

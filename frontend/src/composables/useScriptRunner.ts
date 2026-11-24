@@ -41,6 +41,8 @@ export interface ScriptRunHooks {
   onEnd?(): void;
   /** ai:error */
   onError?(payload: unknown): void;
+  /** ai:impression：剧本链路每 3 条回答推一次面试印象 */
+  onImpression?(view: unknown): void;
 }
 
 /**
@@ -191,6 +193,8 @@ export async function runScriptStream(
       } else if (ev.event === "script:end") {
         ended = true;
         hooks.onEnd?.();
+      } else if (ev.event === "ai:impression") {
+        hooks.onImpression?.(ev.data);
       } else if (ev.event === "ai:error") {
         hooks.onError?.(ev.data);
       }

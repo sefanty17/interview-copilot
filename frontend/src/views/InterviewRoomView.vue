@@ -37,14 +37,25 @@
           <template v-else>
             <span class="text-white/85">自由面试</span>
             <span class="text-white/40">·</span>
-            <span class="text-white/70">第 {{ answeredCount + 1 }} 轮</span>
+            <span class="text-white/70">{{ freeState?.jobName ?? "岗位待确认" }}</span>
+            <template v-if="freeState?.question">
+              <span class="text-white/40">·</span>
+              <span class="text-[#79d9ff]">第 {{ freeState.askedCount }} 题</span>
+            </template>
           </template>
           <span class="text-white/40">·</span>
           <span class="font-mono tabular-nums text-white/85">{{ timerText }}</span>
         </div>
-        <!-- 批次 4.5：自由对话模式的评分说明（与现有提示文案同款样式） -->
+        <!-- 自由面试：题库检索结果（岗位 + 当前题所属知识点）；还没识别岗位时提示流程 -->
         <div v-if="!isScript" class="mt-1 text-xs text-white/60">
-          自由对话模式 · 本模式不产生评分，仅用于对话体验
+          <template v-if="freeState?.question">
+            题库 · {{ freeState.question.type }} · {{ anyKpName(freeState.question.kp) }} · 第
+            {{ freeState.askedCount }} / {{ freeState.questionCount }} 题
+          </template>
+          <template v-else-if="freeState?.jobCode"
+            >面试官会围绕 {{ freeState.jobName }} 的常见考点自由提问（该岗位题库暂未收录）</template
+          >
+          <template v-else>面试官会先问你想面的岗位，再从题库随机抽题</template>
         </div>
         <div v-if="isScript" class="mt-2 ml-auto h-[3px] w-40 overflow-hidden rounded-full bg-white/15">
           <div class="h-full rounded-full bg-[#79d9ff] transition-all duration-500" :style="{ width: (scriptChapter ? scriptProgressPct : progress) + '%' }" />
@@ -113,11 +124,13 @@ import FullAccessWarning from "../components/tools/FullAccessWarning.vue";
 import { dimensionNames, questions as questionBank } from "../data/questions";
 import { jobs } from "../data/jobs";
 import type { InterviewRecord } from "../types/domain";
-import { findInterviewer } from "../data/interviewers";
+import { findInterviewer } from "../store/interviewers";
 import { findScript } from "../data/scripts";
 import { alertDialog, confirmDialog } from "../store/dialogStore";
 import {
   createSession,
+  fetchFreeState,
+  fetchImpression,
   fetchSessionDetail,
   finishSession,
   isBackendUp,
@@ -125,6 +138,8 @@ import {
   startScript,
   submitScriptChoice,
   submitScriptInput,
+  type FreeState,
+  type ImpressionView,
   type ReplyEvent,
   type SessionDetail,
   type StreamEvent,
@@ -158,6 +173,7 @@ import {
 } from "../store/mediaRestore";
 import Icon from "../components/base/widget/Icon.vue";
 import { applyPendingChoice, runScriptStream } from "../composables/useScriptRunner";
+import { applyImpression, resetImpression } from "../store/impressionStore";
 import { useVoicePlayback } from "../composables/useVoicePlayback";
 import { cardForCode, ensureCharactersLoaded } from "../store/characters";
 
@@ -171,6 +187,9 @@ const historyOpen = ref(false);
 const finished = ref(false);
 const autoFinish = ref(false);
 const elapsed = ref(0);
+
+/** 自由面试状态（后端识别出的岗位 + 当前题目）；剧本场次保持 null */
+const freeState = ref<FreeState | null>(null);
 
 const persona = computed(() => findInterviewer(store.session.personaId));
 const job = computed(() => jobs.find((j) => j.id === store.session.jobId) ?? jobs[0]);
@@ -329,6 +348,15 @@ function kpName(id: string) {
   return job.value.knowledgePoints.find((k) => k.id === id)?.name ?? id;
 }
 
+/** 题库按岗位存，知识点编码跨岗位都要认（自由面试的岗位由候选人自己报） */
+function anyKpName(id: string) {
+  for (const j of jobs) {
+    const hit = j.knowledgePoints.find((k) => k.id === id);
+    if (hit) return hit.name;
+  }
+  return id;
+}
+
 function feedbackFor(q: (typeof questionBank)[number], answer: string) {
   const short = answer.trim().length < 26;
   if (short) {
@@ -454,6 +482,8 @@ async function ensureServerSession(): Promise<boolean> {
     });
     sessionId.value = result.sessionId;
     boundScriptCode.value = scriptCode ?? null;
+    // 新场次从零开始：印象按「场次 + 面试官」存，不继承上一场
+    resetImpression();
     // 记住这一场：刷新后靠它续回同一个后端场次（媒体状态 / 章节进度都挂在它上面）
     rememberActiveSession(result.sessionId, scriptCode ?? null);
     // 开场白以刚建出来的场次为准（startSession 会先在本地塞一条同文案的开场，这里换成后端的）
@@ -528,6 +558,12 @@ async function sendToBackend(text: string): Promise<boolean> {
         const data = ev.data as VoiceEvent;
         if (!data?.voiceUrl || data.seq == null) continue;
         pendingVoices.set(data.seq, data.voiceUrl);
+      } else if (ev.event === "ai:question") {
+        // 自由面试：识别到岗位 / 换题时后端推来新状态，抬头立刻变成「岗位 + 第几题」
+        freeState.value = ev.data as FreeState;
+      } else if (ev.event === "ai:impression") {
+        // 面试印象：后端每 3 条回答评估一次，推来六维最新值与本次增量
+        applyImpression(ev.data as ImpressionView);
       } else if (ev.event === "ai:error") {
         console.warn("[interview] ai:error", ev.data);
       }
@@ -566,6 +602,35 @@ async function sendToBackend(text: string): Promise<boolean> {
 }
 
 /**
+ * 自由面试状态：刷新 / 重进房间时从后端恢复（岗位 + 当前题 + 题数）。
+ * 后端不可用或剧本场次时静默跳过，抬头回落到「岗位待确认」。
+ */
+async function refreshFreeState() {
+  const id = sessionId.value;
+  if (id === null) return;
+  try {
+    const state = await fetchFreeState(id);
+    if (state.free) freeState.value = state;
+  } catch (error) {
+    console.warn("[interview] 拉取自由面试状态失败", error);
+  }
+}
+
+/**
+ * 面试印象：刷新 / 重进房间时从后端恢复当前面试官的六维值。
+ * 后端不可用时静默跳过，面板保持「暂无数据」。
+ */
+async function refreshImpression() {
+  const id = sessionId.value;
+  if (id === null) return;
+  try {
+    applyImpression(await fetchImpression(id));
+  } catch (error) {
+    console.warn("[interview] 拉取面试印象失败", error);
+  }
+}
+
+/**
  * 消费一段剧本事件流（开演 / 输入 / 选项三条入口共用）。返回 true 表示后端已经接管
  * 这次提交（产出了台词，或已停在某处等输入），不要再走本地假回复；false 交回 handleSend 降级。
  *
@@ -580,6 +645,7 @@ async function runScript(stream: AsyncGenerator<StreamEvent>): Promise<boolean> 
     onChapter: (c) => (scriptChapter.value = c),
     onProgress: (p) => (scriptProgressPct.value = p),
     onEnd: () => (autoFinish.value = true),
+    onImpression: (view) => applyImpression(view as ImpressionView),
     onError: (payload) => {
       console.warn("[interview] ai:error", payload);
       // 剧本推进出错时后端不会再给台词：必须自己退出「思考中」，并告诉用户原因
@@ -722,7 +788,10 @@ async function finish() {
 
   const pool = questionPool.value;
   // 有效作答轮次；不足 3 轮视为无效面试，分数一律 0（不再给 79+n%4 的假分）
-  const answeredTurns = answeredCount.value;
+  // 自由面试按真实用户台词数算（刷新后续上的场次也不会因 questionIndex 归零被误判为无效）
+  const answeredTurns = isScript.value
+    ? answeredCount.value
+    : store.session.messages.filter((m) => m.role === "user").length;
   const tooShort = answeredTurns < 3;
   const total = tooShort ? 0 : Math.max(1, answeredTurns);
   // 题库不再循环，实际问过的就是前 answeredTurns 道
@@ -846,11 +915,16 @@ onMounted(async () => {
   // 后端可用 → 用模型开场白并等用户输入；不可用 → 保留原来的本地开场问题
   const online = await ensureServerSession();
   if (online) {
+    // 印象按场次存：刷新 / 重进时恢复面板，之后的更新走 ai:impression
+    void refreshImpression();
     // 剧本模式：接剧本引擎（advance 链路）
     if (store.session.mode === "script") {
       await enterScriptScene();
       return;
     }
+    // 自由面试：恢复已识别出的岗位与当前题（全新场次时后端返回 free + 空题，
+    // 抬头先显示「岗位待确认」，等候选人自述后由 ai:question 更新）
+    void refreshFreeState();
     roomStore.cursor = Math.max(0, roomStore.lines.length - 1);
     roomStore.state = roomStore.lines.length ? "responding" : "input";
     return;

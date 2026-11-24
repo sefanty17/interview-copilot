@@ -17,10 +17,10 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from "vue";
 import {
-  affectionStore,
-  type AffectionVector,
+  impressionStore,
+  type ImpressionVector,
   type NegativeVector,
-} from "../../../store/affectionStore";
+} from "../../../store/impressionStore";
 
 interface FloatChip {
   label: string;
@@ -34,31 +34,38 @@ const chips = ref<FloatChip[]>([]);
 let batchId = 0;
 let clearTimer: number | null = null;
 
-const POS_DIMS = ["fondness", "trust", "intimacy", "rapport", "interest", "longing"] as const;
+const POS_DIMS = [
+  "professionalism",
+  "clarity",
+  "logic",
+  "depth",
+  "credibility",
+  "potential",
+] as const;
 const NEG_DIMS = [
-  "anger",
-  "hurt",
+  "skepticism",
+  "confusion",
+  "impatience",
   "disappointment",
-  "indifference",
-  "jealousy",
-  "estrangement",
+  "wariness",
+  "reservation",
 ] as const;
 
 const POS_LABELS: Record<(typeof POS_DIMS)[number], string> = {
-  fondness: "好感",
-  trust: "信赖",
-  intimacy: "亲密",
-  rapport: "默契",
-  interest: "兴趣",
-  longing: "思念",
+  professionalism: "专业性",
+  clarity: "表达力",
+  logic: "逻辑性",
+  depth: "深度",
+  credibility: "可信度",
+  potential: "潜力",
 };
 const NEG_LABELS: Record<(typeof NEG_DIMS)[number], string> = {
-  anger: "愤怒",
-  hurt: "受伤",
+  skepticism: "质疑",
+  confusion: "困惑",
+  impatience: "不耐",
   disappointment: "失望",
-  indifference: "冷漠",
-  jealousy: "嫉妒",
-  estrangement: "疏远",
+  wariness: "戒备",
+  reservation: "顾虑",
 };
 
 const STAGGER_MS = 80;
@@ -66,13 +73,13 @@ const STAGGER_MS = 80;
 const LIFE_MS = 2200;
 
 watch(
-  () => affectionStore.lastChange,
+  () => impressionStore.lastChange,
   (change) => {
     if (!change) return;
     const roleName = "";
     const next: FloatChip[] = [];
     for (const key of POS_DIMS) {
-      const d = change.deltas[key as keyof AffectionVector];
+      const d = change.deltas[key as keyof ImpressionVector];
       if (!d) continue;
       next.push({
         label: POS_LABELS[key],

@@ -1,8 +1,7 @@
 import { computed, reactive } from "vue";
-import { findInterviewer } from "../data/interviewers";
+import { findInterviewer } from "./interviewers";
 import { defaultSettings } from "../constants/defaultSettings";
 import { jobs } from "../data/jobs";
-import { personas } from "../data/personas";
 import { scenes as seedScenes } from "../data/scenes";
 import type { InterviewRecord, SceneInfo, SiteSettings } from "../types/domain";
 import { seedScripts } from "../data/scripts";
@@ -297,8 +296,6 @@ export function deleteScript(code: string): void {
   }
 }
 
-export const currentPersona = computed(
-  () => personas.find((p) => p.id === store.settings.personaId) ?? personas[0],
-);
+export const currentPersona = computed(() => findInterviewer(store.settings.personaId));
 export const currentJob = computed(() => jobs.find((j) => j.id === store.settings.jobId) ?? jobs[0]);
 export const hasActiveSession = computed(() => store.session.active && store.session.messages.length > 0);
