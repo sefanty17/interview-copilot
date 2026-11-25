@@ -66,6 +66,9 @@ class KnowledgeControllerTest {
      * <p>正文里没有「写屏障」三个字，只有假设问题里有，所以这条检索能命中就证明
      * hype 没在传输层被丢掉；同时 {@code hits[0].text} 必须仍是正文原文，
      * 证明假设问题只进词表、不进结果。
+     *
+     * <p>这里显式传 {@code minBm25=-1} 放开门槛：本条用例验的是「hype 能进词表」，
+     * 不是阈值行为。默认门槛 8.0 是给真实语料标定的，两片段的小用例分不够。
      */
     @Test
     void 片段带假设问题时可被用户自己的说法检索到() throws Exception {
@@ -93,7 +96,8 @@ class KnowledgeControllerTest {
 
         mockMvc.perform(get("/api/knowledge/search")
                         .param("q", "写屏障是干什么的")
-                        .param("mode", "bm25"))
+                        .param("mode", "bm25")
+                        .param("minBm25", "-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hits[0].docCode").value(HYPE_CODE))
                 .andExpect(jsonPath("$.hits[0].text")
