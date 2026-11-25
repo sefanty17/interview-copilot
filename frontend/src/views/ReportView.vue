@@ -11,8 +11,15 @@
       <MenuItem v-if="!freeDialogue" size="large" title="总分" icon="◎">
         <div class="mb-4 text-xs text-white/50">
           {{ record.jobName }} · {{ record.personaName }} · {{ record.date }} · {{ record.duration
-          }}{{ evaluation ? " · AI 评估" : "" }}
+          }}{{ evaluation ? (evaluation.ruleBased ? " · 规则估分" : " · AI 评估") : "" }}
         </div>
+
+        <p
+          v-if="evaluation?.ruleBased"
+          class="mb-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-200/90"
+        >
+          本次为规则估分：大模型评估暂不可用，分数按回答轮次、篇幅与论述结构估算，不含逐题复盘，仅供参考。
+        </p>
 
         <div v-if="evaluation?.summary" class="mb-4 text-xs text-white/50">{{ evaluation.summary }}</div>
 

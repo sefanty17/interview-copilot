@@ -76,17 +76,25 @@ public final class EvaluationPrompter {
      */
     private static final int MAX_USER_CHARS = 8000;
 
+    /**
+     * 简历摘要的截断长度：简历是「岗位匹配度」的判据，但它是辅助材料，
+     * 不该把回答挤掉——对话才是评估的主证据。超出部分截断并标省略号。
+     */
+    private static final int MAX_RESUME_CHARS = 600;
+
     private EvaluationPrompter() {
     }
 
     /**
-     * 组出评估用的两条消息：system（角色 + 口径 + 模板）+ user（岗位 + 对话记录）。
+     * 组出评估用的两条消息：system（角色 + 口径 + 模板）+ user（岗位 + 简历 + 对话记录）。
      *
-     * @param jobCode  目标岗位 code（可能为 null，此时 user 里写「未指定」）
-     * @param messages 本场台词，方法内部按 seq 升序排并跳过 system 行
+     * @param jobCode       目标岗位 code（可能为 null，此时 user 里写「未指定」）
+     * @param resumeSummary 候选人简历摘要，可空；仅作岗位匹配度的参考，与回答冲突时以回答为准
+     * @param messages      本场台词，方法内部按 seq 升序排并跳过 system 行
      */
-    public static List<LlmMessage> build(String jobCode, List<InterviewMessage> messages) {
-        return List.of(LlmMessage.system(systemPrompt()), LlmMessage.user(userPrompt(jobCode, messages)));
+    public static List<LlmMessage> build(String jobCode, String resumeSummary, List<InterviewMessage> messages) {
+        return List.of(LlmMessage.system(systemPrompt()),
+                LlmMessage.user(userPrompt(jobCode, resumeSummary, messages)));
     }
 
     private static String systemPrompt() {
@@ -115,11 +123,17 @@ public final class EvaluationPrompter {
         };
     }
 
-    private static String userPrompt(String jobCode, List<InterviewMessage> messages) {
+    private static String userPrompt(String jobCode, String resumeSummary, List<InterviewMessage> messages) {
         String job = jobCode == null || jobCode.isBlank() ? "未指定" : jobCode.trim();
         String footer = "\n请按 system 里给出的四个维度与 JSON 模板输出评估结果。";
         StringBuilder header = new StringBuilder();
         header.append("目标岗位：").append(job).append('\n').append('\n');
+        String resume = resumeOf(resumeSummary);
+        if (resume != null) {
+            // 简历只用于判断「回答与目标岗位贴合不贴合」，明确优先级，免得模型把简历当答案
+            header.append("候选人简历摘要（仅用于判断岗位匹配度，与回答冲突时以回答为准）：")
+                    .append('\n').append(resume).append('\n').append('\n');
+        }
         header.append("以下是本场面试的对话记录（按时间顺序）：").append('\n');
 
         List<InterviewMessage> ordered = new ArrayList<>();
@@ -156,6 +170,21 @@ public final class EvaluationPrompter {
         }
         builder.append(footer);
         return builder.toString();
+    }
+
+    /**
+     * 简历摘要归一：空白当没有；超长截断。
+     *
+     * @return 可直接拼进 prompt 的一行文本；没有简历时返回 null
+     */
+    private static String resumeOf(String resumeSummary) {
+        if (resumeSummary == null || resumeSummary.isBlank()) {
+            return null;
+        }
+        String trimmed = resumeSummary.strip();
+        return trimmed.length() <= MAX_RESUME_CHARS
+                ? trimmed
+                : trimmed.substring(0, MAX_RESUME_CHARS) + "…";
     }
 
     /** role → 展示名；user 是求职者、assistant 是面试官，其余（含 null）按旁白处理。 */

@@ -12,6 +12,7 @@ import java.util.List;
  * @param overallScore 加权总分 {@code round(Σ 各维度分 × 权重)}
  * @param dimensions   固定四个，顺序 technical / depth / logic / fit
  * @param questions    逐题复盘；历史评估没有这一项时为空数组
+ * @param ruleBased    true 表示这份结果来自规则估分（大模型不可用时的兜底），前端要打标注
  */
 public record EvaluationResult(
         Long sessionId,
@@ -24,6 +25,7 @@ public record EvaluationResult(
         List<DimensionScore> dimensions,
         List<QuestionReview> questions,
         String model,
+        boolean ruleBased,
         LocalDateTime createdAt) {
 
     /**

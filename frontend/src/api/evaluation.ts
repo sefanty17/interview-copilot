@@ -41,6 +41,8 @@ export interface EvaluationResult {
   /** 历史评估没有逐题复盘，后端返回空数组，前端显示「重新生成」入口 */
   questions: QuestionReview[];
   model: string | null;
+  /** true 表示大模型不可用，这份分数来自后端规则估分，报告页要打标注 */
+  ruleBased: boolean;
   createdAt: string | null;
 }
 
