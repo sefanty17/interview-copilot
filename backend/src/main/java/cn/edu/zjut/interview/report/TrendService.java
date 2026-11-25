@@ -188,13 +188,34 @@ public class TrendService {
         List<Recommendation> recommendations = new ArrayList<>(RECOMMEND_COUNT);
         for (int i = 0; i < weaknesses.size() && i < RECOMMEND_COUNT; i++) {
             Weakness weakness = weaknesses.get(i);
-            List<KnowledgeHit> hits = retrievalService.search(weakness.query(), null, jobCode,
-                    RetrievalService.SearchOptions.defaults().withTopK(TOP_K),
-                    RetrievalService.RetrievalMode.HYBRID);
+            List<KnowledgeHit> hits = recommendHits(weakness.query(), jobCode);
             recommendations.add(new Recommendation(weakness.code(), weakness.label(),
                     weakness.average(), weakness.query(), hits));
         }
         return List.copyOf(recommendations);
+    }
+
+    /**
+     * 推荐场景的检索：先用注入门槛试一次，空结果再放开阈值兜底。
+     *
+     * <p>为什么不是一步放开：同一个 RRF 排序下，严阈值通过的结果一定是松阈值的子集，
+     * 先严后松不会牺牲质量。评语具体（带术语，如「Spring 事务传播级别没区分」）时
+     * 第一次就能命中，质量最高；评语是「深度不够」这类抽象短语时，8.0 会把候选全筛掉，
+     * 此时宁可给一条不太贴切的资料，也好过让页面误报「知识库没有条目」。
+     *
+     * <p>只影响推荐这一次调用，不改 {@link RetrievalService} 的全局默认阈值，注入链路不受影响。
+     */
+    private List<KnowledgeHit> recommendHits(String query, String jobCode) {
+        List<KnowledgeHit> hits = retrievalService.search(query, null, jobCode,
+                RetrievalService.SearchOptions.defaults().withTopK(TOP_K),
+                RetrievalService.RetrievalMode.HYBRID);
+        if (!hits.isEmpty()) {
+            return hits;
+        }
+        return retrievalService.search(query, null, jobCode,
+                RetrievalService.SearchOptions.defaults().withTopK(TOP_K)
+                        .withThresholds(0.0, 0.0),
+                RetrievalService.RetrievalMode.HYBRID);
     }
 
     /**

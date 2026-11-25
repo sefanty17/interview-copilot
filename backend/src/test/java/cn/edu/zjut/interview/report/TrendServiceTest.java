@@ -12,6 +12,7 @@ import cn.edu.zjut.interview.repository.InterviewEvaluationRepository;
 import cn.edu.zjut.interview.repository.InterviewSessionRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -27,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -110,6 +113,37 @@ class TrendServiceTest {
         assertEquals(64, logic.averageScore());
 
         assertTrue(fit.hits().size() == 1 && logic.hits().size() == 1, "替身命中的片段要原样带出");
+    }
+
+    /**
+     * 评语抽象时（「岗位匹配度-2」这种短句）8.0 门槛可能一条都命中不了。
+     * 推荐必须先用默认门槛、空结果再放开阈值兜底，不能让页面误报「知识库没有条目」。
+     */
+    @Test
+    void 严阈值无命中时推荐放宽阈值兜底() {
+        when(retrievalService.search(anyString(), any(), any(), any(), any()))
+                .thenReturn(List.of())
+                .thenReturn(List.of(new KnowledgeHit(1, 2, "spring-core", "Spring", "事务",
+                        "兜底命中的片段", 0.1, 0.1, 0.0)));
+
+        Long only = newSession(1L, LocalDateTime.of(2026, 10, 1, 9, 0));
+        newEvaluation(only, "java", 65, "第一场", dims(84, 74, 60, 50));
+
+        TrendView view = trendService.trend(null);
+
+        assertEquals(2, view.recommendations().size(), "两个短板都要有推荐");
+        assertEquals(1, view.recommendations().get(0).hits().size(), "严阈值空结果时要放宽再试");
+        assertEquals(1, view.recommendations().get(1).hits().size(), "第二个短板严阈值就命中了");
+
+        ArgumentCaptor<RetrievalService.SearchOptions> options =
+                ArgumentCaptor.forClass(RetrievalService.SearchOptions.class);
+        // 短板 1：严（空）→ 松（命中）；短板 2：严直接命中，不再兜底
+        verify(retrievalService, times(3)).search(anyString(), any(), any(), options.capture(), any());
+        assertEquals(RetrievalService.SearchOptions.defaults().minBm25Score(),
+                options.getAllValues().get(0).minBm25Score(), "第一次仍用注入门槛");
+        assertEquals(0.0, options.getAllValues().get(1).minBm25Score(), "兜底时才放开门槛");
+        assertEquals(RetrievalService.SearchOptions.defaults().minBm25Score(),
+                options.getAllValues().get(2).minBm25Score(), "下个短板仍先从严阈值开始");
     }
 
     /** 3 天练习计划：前两天按最弱 → 次弱，第三天综合并链到最后一场报告。 */

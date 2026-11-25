@@ -195,7 +195,9 @@
           </li>
         </ul>
         <p v-if="!rec.hits.length" class="mt-3 text-xs text-white/40">
-          知识库里暂无对应条目，可先在「设置 → 知识库」导入语料。
+          {{ rec.query.length < 12
+            ? "这段评语比较笼统，暂时没匹配到具体资料，直接练一场更有效。"
+            : "知识库里暂无对应条目，可先在「设置 → 知识库」导入语料。" }}
         </p>
       </div>
     </MenuItem>
