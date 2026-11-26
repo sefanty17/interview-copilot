@@ -378,6 +378,8 @@ function startBond(): void {
   if (!canStartBond.value) return;
   localStorage.setItem("bondCharacter", bondCharacter.value);
   localStorage.setItem("bondScript", bondScript.value);
+  // 这里是完整流程入口：清掉练习计划遗留的专项约束
+  localStorage.removeItem("bondFocus");
   const script = scripts.value.find((s) => s.code === bondScript.value) ?? findScript(bondScript.value);
   const name = script?.script_name ?? "未命名剧本";
   // 正式剧本面试：mode=script 会让房间把 bondScript 带进 createSession（script_id 落库），

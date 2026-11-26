@@ -27,8 +27,8 @@
             <StartItem @click="go('/workshop')">创意工坊</StartItem>
           </div>
           <div v-else-if="menu === 'start'" key="start" class="flex flex-col items-stretch">
-            <StartItem @click="startFree">自由面试</StartItem>
             <StartItem @click="openScripts">剧本面试</StartItem>
+            <StartItem @click="startFree">自由面试</StartItem>
             <StartItem @click="backToMain">返回</StartItem>
           </div>
           <!-- 岗位由面试官在房间里自然询问，不再单独设岗位选择菜单 -->
@@ -136,6 +136,8 @@ function startScript(script: InterviewScript) {
   const interviewer = (script.interviewer_code as PersonaId | undefined) ?? store.settings.personaId;
   localStorage.setItem("bondScript", script.code);
   localStorage.setItem("bondCharacter", interviewer);
+  // 普通剧本入口是完整流程，清掉练习计划留下的专项，避免只被追着一个维度问
+  localStorage.removeItem("bondFocus");
   startSession(script.job_code ?? store.settings.jobId, interviewer, "script");
   router.push("/interview");
 }

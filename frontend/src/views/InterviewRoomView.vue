@@ -590,6 +590,14 @@ async function ensureServerSession(): Promise<boolean> {
     // 剧本模式带上「剧本冒险」里选中的剧本 code；自由模式不传（后端不再按岗位自动绑剧本）
     const scriptMode = store.session.mode === "script";
     const scriptCode = scriptMode ? localStorage.getItem("bondScript") || undefined : undefined;
+    // 专项训练：练习计划进入时在 bondFocus 里带「维度 + 当天要点」，普通剧本入口没有这个键
+    let focus: { code?: string; label?: string; brief?: string } | null = null;
+    try {
+      const rawFocus = scriptMode ? localStorage.getItem("bondFocus") : null;
+      focus = rawFocus ? JSON.parse(rawFocus) : null;
+    } catch {
+      focus = null;
+    }
     const bond = scriptCode
       ? store.scripts.find((s) => s.code === scriptCode) ?? findScript(scriptCode)
       : undefined;
@@ -599,6 +607,9 @@ async function ensureServerSession(): Promise<boolean> {
       interviewerCode: scriptMode ? store.session.personaId : store.settings.personaId,
       jobId: scriptMode ? bond?.job_code ?? store.session.jobId : store.settings.jobId,
       scriptCode,
+      focusCode: focus?.code,
+      focusLabel: focus?.label,
+      focusBrief: focus?.brief,
     });
     sessionId.value = result.sessionId;
     boundScriptCode.value = scriptCode ?? null;

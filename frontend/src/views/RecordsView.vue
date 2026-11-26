@@ -188,7 +188,9 @@
             class="rounded-lg border border-white/10 bg-[#0b1522]/60 p-2.5"
           >
             <div class="text-xs font-bold text-white/80">
-              {{ hit.docTitle }}
+              <span v-if="hit.chunkIndex !== undefined" class="text-white/45"
+                >第 {{ hit.chunkIndex + 1 }} 段 · </span
+              >{{ hit.docTitle }}
               <span v-if="hit.heading" class="text-white/45"> · {{ hit.heading }}</span>
             </div>
             <p class="mt-1 line-clamp-2 text-[11px] leading-relaxed text-white/55">{{ hit.text }}</p>
@@ -228,7 +230,7 @@
           <div class="mt-auto pt-3">
             <button
               class="cursor-pointer rounded-full border border-[#79d9ff]/40 bg-[#79d9ff]/15 px-4 py-1.5 text-xs font-bold text-[#79d9ff] transition-colors hover:bg-[#79d9ff]/25"
-              @click="router.push(day.entryRoute)"
+              @click="startPracticeDay(day)"
             >
               {{ day.entryLabel }}
             </button>
@@ -396,27 +398,64 @@ const trendSeries = computed(() => {
  * （自由对话 `script_id` 为空、也不产生评估）。如果开自由面试，练完这一场
  * 不会进曲线、也不会回流到「短板」，闭环就断了——「练习—评估—提升」里
  * 评估这一步是空的，下次进来看到的还是同一份结论。
- *
- * <p>剧本按岗位挑第一本匹配的；没有匹配剧本时退回自由面试并说明原因，
- * 而不是静默开一场不进曲线的练习。
  */
 function practice(rec: TrendRecommendation) {
+  startScriptPractice({
+    code: rec.dimCode,
+    label: rec.label,
+    brief: rec.query,
+    notice: `已开始「${rec.label}」专项练习（剧本面试，本场会计入成长曲线）`,
+  });
+}
+
+/**
+ * 练习计划的 DAY 1 / DAY 2：同样走剧本面试，并带上当天的专项与要点。
+ *
+ * <p>DAY 3 是综合复盘（dimCode 为空），仍按后端给的 entryRoute 跳报告页。
+ * 专项信息写进 bondFocus，由房间页带进 createSession，后端会拼成「只深挖这一项」的
+ * system 约束，面试官就不会按完整流程泛泛提问。
+ */
+function startPracticeDay(day: TrendPracticeDay) {
+  if (!day.dimCode) {
+    router.push(day.entryRoute);
+    return;
+  }
+  startScriptPractice({
+    code: day.dimCode,
+    label: day.label,
+    brief: day.tasks.join("；").slice(0, 260),
+    notice: `已开始 DAY ${day.day} 专项练习：${day.label}（剧本面试，本场会计入成长曲线）`,
+  });
+}
+
+/**
+ * 开一场带专项的剧本面试：岗位取最近一场，剧本按岗位挑第一本。
+ *
+ * <p>没有匹配剧本时退回自由对话并说明原因，而不是静默开一场不进曲线的练习。
+ */
+function startScriptPractice(opts: { code: string; label: string; brief: string; notice: string }) {
   const jobCode = trendPoints.value[trendPoints.value.length - 1]?.jobCode;
   const job = jobs.find((j) => j.id === jobCode) ?? jobs[0];
   // 首页与设置页的剧本都从 seedScripts 取（本项目没有远程剧本列表），这里同一口径
   const script = seedScripts.find((s) => s.job_code === job.id);
   if (!script) {
+    localStorage.removeItem("bondFocus");
     startSession(job.id, store.settings.personaId, "free");
-    notify(`该岗位暂无剧本，已用自由面试开始「${rec.label}」练习（本场不计入成长曲线）`);
+    notify(`该岗位暂无剧本，已用自由面试开始「${opts.label}」练习（本场不计入成长曲线）`);
     router.push("/interview");
     return;
   }
-  // 与首页「剧本面试」同一条绑定路径：房间页靠 bondScript 把 script_id 落库
+  // 与首页「剧本面试」同一条绑定路径：房间页靠 bondScript 把 script_id 落库，
+  // bondFocus 让这一场只练专项（普通剧本入口会在起始处清掉这个键）
   const interviewer = (script.interviewer_code as PersonaId | undefined) ?? store.settings.personaId;
   localStorage.setItem("bondScript", script.code);
   localStorage.setItem("bondCharacter", interviewer);
+  localStorage.setItem(
+    "bondFocus",
+    JSON.stringify({ code: opts.code, label: opts.label, brief: opts.brief }),
+  );
   startSession(script.job_code ?? job.id, interviewer, "script");
-  notify(`已开始「${rec.label}」专项练习（剧本面试，本场会计入成长曲线）`);
+  notify(opts.notice);
   router.push("/interview");
 }
 

@@ -48,6 +48,10 @@ export interface CreateSessionPayload {
   jobId: string;
   /** 指定剧本编码（后端 CreateSessionRequest.scriptCode）；留空则建纯自由会话，要演剧本再调 startScript */
   scriptCode?: string;
+  /** 专项训练：维度 code / 名称 / 当天要点；从练习计划进入剧本面试时带上 */
+  focusCode?: string;
+  focusLabel?: string;
+  focusBrief?: string;
 }
 
 export interface CreateSessionResult {
