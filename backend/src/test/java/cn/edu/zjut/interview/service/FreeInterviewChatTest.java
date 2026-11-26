@@ -87,6 +87,8 @@ class FreeInterviewChatTest {
         assertTrue(system.contains("本场面试岗位：Web 前端"), "岗位名应进 prompt");
         assertTrue(system.contains(question.getText()), "当前题面应进 prompt");
         assertTrue(system.contains("参考要点"), "参考要点应进 prompt");
+        assertTrue(system.contains("Java 后端岗位背景"), "世界书 always 条目应按岗位进 system");
+        assertTrue(system.contains("[世界书参考资料]"), "世界书注入块应出现在 system");
     }
 
     @Test
