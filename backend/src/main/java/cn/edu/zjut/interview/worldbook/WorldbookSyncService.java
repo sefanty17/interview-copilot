@@ -94,6 +94,8 @@ public class WorldbookSyncService {
         WorldbookBook row = bookRepository.findByCode(code).orElseGet(WorldbookBook::new);
         boolean isNew = row.getId() == null;
         row.setCode(code);
+        // 岗位：YAML 顶层 job_code 优先，没写就用文件名（java.yml → java）
+        row.setJobCode(book.jobCode() == null || book.jobCode().isBlank() ? code : book.jobCode().trim());
         row.setName(book.name() == null || book.name().isBlank() ? code : book.name());
         row.setDescription(book.description());
         row.setSourcePath(relativePath(file));

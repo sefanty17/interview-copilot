@@ -5,9 +5,11 @@ import cn.edu.zjut.interview.domain.InterviewMessage;
 import cn.edu.zjut.interview.domain.InterviewSession;
 import cn.edu.zjut.interview.domain.Interviewer;
 import cn.edu.zjut.interview.llm.LlmClient;
+import cn.edu.zjut.interview.llm.LlmMessage;
 import cn.edu.zjut.interview.repository.InterviewChapterRepository;
 import cn.edu.zjut.interview.repository.InterviewMessageRepository;
 import cn.edu.zjut.interview.repository.InterviewerRepository;
+import cn.edu.zjut.interview.worldbook.WorldbookInjector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -49,6 +51,9 @@ public class EngineContext {
     private final Set<String> presentRoles;
     /** 本轮生成的可调项（台词合并阈值 / 回复段数），由引擎按后端设置填。 */
     private ChatTuning tuning = ChatTuning.DEFAULTS;
+
+    /** 世界书注入器（issue #1）；测试构造的上下文没有它时注入自动跳过。 */
+    private WorldbookInjector worldbookInjector;
 
     /** 不带在场集合的构造：默认舞台上只有主角（{@code {"MAIN"}}）。 */
     public EngineContext(InterviewSession session,
@@ -165,6 +170,22 @@ public class EngineContext {
     /** 由 {@code InterviewEngine} 在开跑前按后端设置填一次。 */
     public void tuning(ChatTuning tuning) {
         this.tuning = tuning == null ? ChatTuning.DEFAULTS : tuning;
+    }
+
+    /** 由 {@code InterviewEngine} 在开跑前注入一次；不设置时世界书注入跳过。 */
+    public void worldbookInjector(WorldbookInjector injector) {
+        this.worldbookInjector = injector;
+    }
+
+    /**
+     * 把本场岗位的世界书注入请求副本（issue #1）：只改这一轮，不落库。
+     *
+     * @param userInput 剧本 ai_dialogue 传 null（只注入 always）；剧本内自由对话传玩家原话
+     */
+    public void injectWorldbook(List<LlmMessage> messages, String userInput) {
+        if (worldbookInjector != null) {
+            worldbookInjector.inject(session, messages, userInput);
+        }
     }
 
     /** 可变剧本变量表（{@code script_status.vars}）。 */

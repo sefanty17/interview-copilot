@@ -2,6 +2,7 @@
 # 使用时整条注入 system 提示词，不参与检索；真相源是本文件，重启后由启动扫描入库。
 name: 前端岗位背景
 description: 校招前端岗的产品、团队与技术栈设定，供面试官追问时引用。
+job_code: frontend
 entries:
   - id: company
     name: 公司背景

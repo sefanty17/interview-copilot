@@ -38,6 +38,7 @@ import cn.edu.zjut.interview.stream.SentenceSplitter;
 import cn.edu.zjut.interview.speech.tts.TtsVoiceService;
 import cn.edu.zjut.interview.stream.SymbolParser;
 import cn.edu.zjut.interview.worldbook.Worldbook;
+import cn.edu.zjut.interview.worldbook.WorldbookInjector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
@@ -113,6 +114,11 @@ public class ChatService {
     private final KnowledgeInjector knowledgeInjector;
 
     /**
+     * 世界书注入（issue #1）：按会话岗位从两张表组装固定背景，与 CLOB 分支叠加。
+     */
+    private final WorldbookInjector worldbookInjector;
+
+    /**
      * 自由面试（issue #11）：识别岗位 → 按岗位随机抽题 → 把当前题拼进本轮 system。
      *
      * <p>剧本场次直接返回 inactive，与改造前逐字一致。
@@ -185,6 +191,7 @@ public class ChatService {
                        InterviewerRelationService interviewerRelations,
                        GodAgentCore godAgent,
                        KnowledgeInjector knowledgeInjector,
+                       WorldbookInjector worldbookInjector,
                        FreeInterviewService freeInterviews,
                        ImpressionService impressions,
                        TtsVoiceService ttsVoiceService) {
@@ -202,6 +209,7 @@ public class ChatService {
         this.interviewerRelations = interviewerRelations;
         this.godAgent = godAgent;
         this.knowledgeInjector = knowledgeInjector;
+        this.worldbookInjector = worldbookInjector;
         this.freeInterviews = freeInterviews;
         this.impressions = impressions;
         this.ttsVoiceService = ttsVoiceService;
@@ -242,6 +250,12 @@ public class ChatService {
 
         // 2. 拼完整 system 串
         String systemPrompt = buildSystemPrompt(interviewer, profile, script);
+        // 2.1 专项训练（练习计划点进来）：把「这一场只深挖什么」压进 system，剧本路径才生效
+        String focusLabel = script == null ? null : trimToNull(request.focusLabel());
+        String focusBrief = script == null ? null : trimToNull(request.focusBrief());
+        if (focusLabel != null) {
+            systemPrompt += buildFocusBlock(focusLabel, focusBrief);
+        }
 
         // 3. 建 interview_session 行
         InterviewSession session = new InterviewSession();
@@ -250,6 +264,10 @@ public class ChatService {
         session.setInterviewerId(interviewer.getId());
         session.setScriptId(script == null ? null : script.getId());
         session.setJobCode(jobId);
+        // 专项训练留痕：记录本场针对哪个维度、训练要点是什么，便于记录页/复盘查看
+        if (focusLabel != null) {
+            session.setKps(focusKps(request.focusCode(), focusLabel, focusBrief));
+        }
         session.setStatus("running");
         // 在场角色：默认只有主面试官（多人由 setPresentRoleIds 追加）
         session.setPresentRoleIds(String.valueOf(interviewer.getId()));
@@ -395,6 +413,9 @@ public class ChatService {
                 if (worldbook != null) {
                     worldbook.inject(messages, rounds == 0 ? main : null);
                 }
+                // 5.5.1 表驱动世界书（issue #1）：按会话岗位注入，与角色卡 CLOB 分支叠加；
+                // 两条都为空时零开销，注入只改本轮副本
+                worldbookInjector.inject(session, messages, rounds == 0 ? main : null);
 
                 // 5.6 批次 4.4 一次性临时 system 注入（announce / 上一轮纠偏），取走即弃、不落库
                 injectPendingSystemMessages(messages, session.getId());
@@ -1021,6 +1042,49 @@ public class ChatService {
      */
     private String freeOpening(Interviewer interviewer) {
         return "先坐，我是" + interviewer.getName() + "。今天由我来面你，先聊聊：你想面什么岗位，或者哪个方向？";
+    }
+
+    /**
+     * 专项训练约束块：练习计划点进来时，只练一个维度，逼着往纵向深挖。
+     *
+     * <p>和完整流程的区别是「不换话题」：先项目背景，再方案与指标，最后失败与改进。
+     */
+    private String buildFocusBlock(String label, String brief) {
+        StringBuilder block = new StringBuilder();
+        block.append("\n\n【本场专项训练：").append(label).append("】\n");
+        block.append("本场不做完整流程，只围绕这个专项连续深挖，至少追问 2 层，不要主动换话题：\n");
+        block.append("1) 先让候选人用一个具体项目或经历说明，追问背景、目标和他的个人职责；\n");
+        block.append("2) 再追问方案取舍、关键指标与最终结果，要求给出数字或对比；\n");
+        block.append("3) 最后追问失败点、边界情况，以及如果重做会怎么改。\n");
+        block.append("每次只问一个问题，等候选人回答后再追问；回答空泛时先要细节，不要替候选人总结。\n");
+        if (brief != null) {
+            block.append("参考训练要点：").append(brief).append('\n');
+        }
+        return block.toString();
+    }
+
+    /** 空串归一成 null，避免前端传了空字段就当成「有专项」。 */
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.strip();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * 专项信息落 {@code interview_session.kps}（VARCHAR 512）。
+     *
+     * <p>只做展示/追溯，不参与对话；brief 截到 300 字，保证 JSON 不越过列长。
+     */
+    private String focusKps(String code, String label, String brief) {
+        String safeBrief = brief != null && brief.length() > 300 ? brief.substring(0, 300) : brief;
+        return "{\"code\":\"" + safe(code) + "\",\"label\":\"" + safe(label)
+                + "\",\"brief\":\"" + safe(safeBrief) + "\"}";
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value.replace("\"", "'");
     }
 
     /** 拼 system 串：人设 + 面试编排 + 框架句 + 格式 + 示例 + 情绪限制 + 正文要求 + 身份/关系块。 */

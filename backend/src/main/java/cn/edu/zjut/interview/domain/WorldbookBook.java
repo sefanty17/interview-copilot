@@ -29,6 +29,10 @@ public class WorldbookBook {
     @Column(name = "code", length = 64, nullable = false, unique = true)
     private String code;
 
+    /** 岗位编码（{@code interview_session.job_code}）：按岗位查书注入；YAML 没写时同步回填文件名。 */
+    @Column(name = "job_code", length = 32)
+    private String jobCode;
+
     @Column(name = "name", length = 128)
     private String name;
 
@@ -62,6 +66,14 @@ public class WorldbookBook {
 
     public void setCode(String code) {
         this.code = code;
+    }
+
+    public String getJobCode() {
+        return jobCode;
+    }
+
+    public void setJobCode(String jobCode) {
+        this.jobCode = jobCode;
     }
 
     public String getName() {

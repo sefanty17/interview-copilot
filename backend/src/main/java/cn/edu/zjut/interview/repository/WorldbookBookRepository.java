@@ -12,4 +12,9 @@ public interface WorldbookBookRepository extends JpaRepository<WorldbookBook, Lo
     Optional<WorldbookBook> findByCode(String code);
 
     List<WorldbookBook> findAllByOrderBySortOrderAscCodeAsc();
+
+    List<WorldbookBook> findByJobCodeOrderBySortOrderAscCodeAsc(String jobCode);
+
+    /** 按岗位取启用的书（注入用；多本时按 sort_order 取第一本）。 */
+    List<WorldbookBook> findByJobCodeAndEnabledTrueOrderBySortOrderAscCodeAsc(String jobCode);
 }

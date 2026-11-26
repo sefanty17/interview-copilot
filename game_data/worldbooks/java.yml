@@ -2,6 +2,7 @@
 # 使用时整条注入 system 提示词，不参与检索；真相源是本文件，重启后由启动扫描入库。
 name: Java 后端岗位背景
 description: 校招 Java 后端岗的公司、团队与技术栈设定，供面试官追问时引用。
+job_code: java
 entries:
   - id: company
     name: 公司背景
