@@ -12,6 +12,7 @@ import {
 import { handlePttKeyDown, handlePttKeyUp, handleWindowBlur } from "./ptt";
 export { ASR_AUTO_SEND_DELAY_MS, useAsrAutoSend } from "./auto-send";
 export { registerAsrInputBridge } from "./input-bridge";
+export { setStopVoiceBeforeRecording } from "./ptt";
 import {
   activeSource,
   asrLockedUntil,

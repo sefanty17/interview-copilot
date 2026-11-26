@@ -153,7 +153,7 @@ import {
   updateSettings,
 } from "../../../store/appStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
-import type { LightingParams, SceneInfo } from "../../../data/mock";
+import type { LightingParams, SceneInfo } from "../../../types/domain";
 
 type LocationType = NonNullable<SceneInfo["location_type"]>;
 

@@ -400,6 +400,18 @@ function onAsrSend(e: Event): void {
   asrAutoSend.arm(text);
 }
 
+/**
+ * 门控拒绝提示（`composables/asr/ptt.ts::notifyBlocked` 派发）。
+ *
+ * <p>为什么不能静默：语音门控有十来个条件（总开关、对话状态、TTS 播放中、选项挂起…），
+ * 用户点麦克风没反应时只会以为"功能坏了"。这里把原因说出来，
+ * 至少让他知道是"设置没开"还是"等我方说完"。
+ */
+function onAsrBlocked(e: Event): void {
+  const reason = String((e as CustomEvent<string | undefined>).detail ?? "");
+  if (reason) notify(reason);
+}
+
 onMounted(() => {
   if (roomStore.state === "responding") {
     const line = roomStore.lines[roomStore.cursor];
@@ -414,6 +426,7 @@ onMounted(() => {
   registerAsrInputBridge((text) => fillFromAsr(text));
   window.addEventListener("asr-text", onAsrText);
   window.addEventListener("asr-send", onAsrSend);
+  window.addEventListener("asr-blocked", onAsrBlocked);
   // 门控开关：只有聊天框挂载期间语音才可用（离开房间由 onBeforeUnmount 置回 false，
   // 否则语音会在别的页面被触发）
   setChatMounted(true);
@@ -430,6 +443,7 @@ onBeforeUnmount(() => {
   setChatMounted(false);
   window.removeEventListener("asr-text", onAsrText);
   window.removeEventListener("asr-send", onAsrSend);
+  window.removeEventListener("asr-blocked", onAsrBlocked);
 });
 
 // ─────────────────────────── 操作按钮 ───────────────────────────

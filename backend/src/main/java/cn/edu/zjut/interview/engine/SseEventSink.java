@@ -151,6 +151,14 @@ public class SseEventSink implements EventSink {
     }
 
     /**
+     * 面试印象更新：{@code GET /api/sessions/{id}/impression} 的同一个
+     * {@code ImpressionView}，前端直接覆盖六维当前值。
+     */
+    public void impression(Object view) {
+        send("ai:impression", view);
+    }
+
+    /**
      * 引擎抛异常时由 Controller 调这个：先推 {@code ai:error}，再推 {@code status:reset}。
      *
      * <p>同 Rust {@code events::emit_error}——报错的同时把前端状态复位，否则界面停在等待态。

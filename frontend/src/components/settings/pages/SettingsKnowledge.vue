@@ -23,29 +23,60 @@
             <div
               v-for="doc in docs"
               :key="doc.code"
-              class="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3"
+              class="rounded-xl border border-white/10 bg-white/5"
             >
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm text-white/85">{{ doc.title }}</p>
-                <span class="text-[11px] text-white/35"
-                  >{{ doc.code }} · {{ doc.category || "未分类" }} · {{ doc.chunkCount }} 片段 ·
-                  向量 {{ doc.vectorCount }}</span
+              <div class="flex items-center gap-3 p-3">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm text-white/85">{{ doc.title }}</p>
+                  <span class="text-[11px] text-white/35"
+                    >{{ doc.code }} · {{ doc.category || "未分类" }} · {{ doc.chunkCount }} 片段 ·
+                    向量 {{ doc.vectorCount }}</span
+                  >
+                </div>
+                <button class="btn-sm shrink-0" @click="toggleChunks(doc.code)">
+                  {{ expandedDoc === doc.code ? "收起" : "切块" }}
+                </button>
+                <button
+                  class="btn-sm shrink-0"
+                  :disabled="busyCode === doc.code"
+                  @click="reindex(doc.code)"
                 >
+                  重新索引
+                </button>
+                <button
+                  class="btn-sm shrink-0"
+                  :disabled="busyCode === doc.code"
+                  @click="removeDoc(doc)"
+                >
+                  删除
+                </button>
               </div>
-              <button
-                class="btn-sm shrink-0"
-                :disabled="busyCode === doc.code"
-                @click="reindex(doc.code)"
+
+              <!-- 切块预览：导入后可检索的最小单位，答辩时用来解释「知识从哪一段来」 -->
+              <div
+                v-if="expandedDoc === doc.code"
+                class="border-t border-white/10 px-3 py-2.5"
               >
-                重新索引
-              </button>
-              <button
-                class="btn-sm shrink-0"
-                :disabled="busyCode === doc.code"
-                @click="removeDoc(doc)"
-              >
-                删除
-              </button>
+                <p v-if="chunksLoading" class="text-[11px] text-white/40">读取切块中...</p>
+                <div v-else class="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1">
+                  <div
+                    v-for="chunk in docChunks"
+                    :key="chunk.chunkIndex"
+                    class="rounded-lg bg-black/20 p-2.5"
+                  >
+                    <p class="text-[11px] text-white/35">
+                      第 {{ chunk.chunkIndex + 1 }} 段 · {{ chunk.charCount }} 字
+                    </p>
+                    <p class="text-[12px] text-white/75">{{ chunk.heading || "（无标题）" }}</p>
+                    <p class="line-clamp-2 text-[11px] leading-relaxed text-white/45">
+                      {{ chunk.text }}
+                    </p>
+                  </div>
+                  <p v-if="docChunks.length === 0" class="text-[11px] text-white/40">
+                    该文档还没有切块。
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -83,29 +114,51 @@
         </div>
       </MenuItem>
 
-      <!-- ========== 试搜 ========== -->
-      <MenuItem title="试搜">
+      <!-- ========== 搜索 ========== -->
+      <MenuItem title="搜索">
         <template #header>
           <Search :size="20" />
         </template>
 
         <div class="flex w-full flex-col gap-3">
+          <input
+            v-model="query"
+            class="glass-input w-full"
+            placeholder="输入一个问题，看看会命中哪些片段"
+            @keydown.enter="runSearch"
+          />
           <div class="flex items-center gap-2">
-            <input
-              v-model="query"
-              class="glass-input flex-1"
-              placeholder="输入一个问题，看看会命中哪些片段"
-              @keydown.enter="runSearch"
-            />
-            <select v-model="mode" class="glass-input w-32 cursor-pointer">
-              <option value="hybrid">hybrid</option>
-              <option value="bm25">bm25</option>
-              <option value="vector">vector</option>
+            <select
+              v-model="scope"
+              class="glass-input shrink-0 cursor-pointer"
+              style="width: 5.5rem"
+              title="检索范围：按语料岗位过滤"
+            >
+              <option value="">全部</option>
+              <option value="java">Java</option>
+              <option value="frontend">前端</option>
             </select>
-            <button class="btn-sm shrink-0" :disabled="searching || !query.trim()" @click="runSearch">
-              {{ searching ? "检索中..." : "检索" }}
+            <select
+              v-model="mode"
+              class="glass-input shrink-0 cursor-pointer"
+              style="width: 6rem"
+              title="混合 = 向量 + 关键词融合；关键词 = 纯字面匹配；语义 = 纯向量"
+            >
+              <option value="hybrid">混合</option>
+              <option value="bm25">关键词</option>
+              <option value="vector">语义</option>
+            </select>
+            <button
+              class="btn-sm ml-auto shrink-0"
+              :disabled="searching || !query.trim()"
+              @click="runSearch"
+            >
+              {{ searching ? "检索中..." : "搜索" }}
             </button>
           </div>
+          <p class="text-[11px] leading-relaxed text-white/35">
+            范围按语料岗位过滤；模式里「关键词」适合查专有名词，「语义」适合换种说法，「混合」两者取长补短（默认）。
+          </p>
 
           <p v-if="result" class="text-[11px] text-white/40">
             检索范围 {{ result.scopeSize }} 个片段
@@ -117,7 +170,9 @@
               :key="hit.chunkId"
               class="rounded-xl border border-white/10 bg-black/20 p-3"
             >
-              <p class="text-[11px] text-white/35">{{ hit.docCode }} · {{ hit.docTitle }}</p>
+              <p class="text-[11px] text-white/35">
+                第 {{ hit.chunkIndex + 1 }} 段 · {{ hit.docCode }} · {{ hit.docTitle }}
+              </p>
               <p class="text-sm text-white/85">{{ hit.heading }}</p>
               <p class="line-clamp-3 text-[12px] leading-relaxed text-white/50">{{ hit.text }}</p>
               <span class="text-[11px] text-white/35"
@@ -150,10 +205,12 @@ import { notify } from "../../../store/appStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
 import {
   deleteKnowledgeDoc,
+  listDocChunks,
   listKnowledgeDocs,
   reindexDoc,
   searchKnowledge,
   uploadMarkdown,
+  type KnowledgeChunkView,
   type KnowledgeDocView,
   type KnowledgeSearchResult,
 } from "../../../api/knowledge";
@@ -167,6 +224,35 @@ const busyCode = ref("");
 
 const chunkTotal = computed(() => docs.value.reduce((sum, doc) => sum + doc.chunkCount, 0));
 const modelLabel = computed(() => docs.value.find((doc) => doc.model)?.model ?? "—");
+
+// ---------- 切块预览 ----------
+
+/** 当前展开的文档 code；空串 = 全部收起 */
+const expandedDoc = ref("");
+const docChunks = ref<KnowledgeChunkView[]>([]);
+const chunksLoading = ref(false);
+
+const toggleChunks = async (code: string) => {
+  if (expandedDoc.value === code) {
+    expandedDoc.value = "";
+    return;
+  }
+  expandedDoc.value = code;
+  docChunks.value = [];
+  chunksLoading.value = true;
+  try {
+    const chunks = await listDocChunks(code);
+    // 请求期间可能又点了别的文档，只在仍然展开它时才写回
+    if (expandedDoc.value === code) {
+      docChunks.value = chunks;
+    }
+  } catch (e) {
+    expandedDoc.value = "";
+    void alertDialog("读取切块失败", e instanceof Error ? e.message : String(e));
+  } finally {
+    chunksLoading.value = false;
+  }
+};
 
 const load = async () => {
   loading.value = true;
@@ -256,9 +342,11 @@ const submit = async () => {
   }
 };
 
-// ---------- 试搜 ----------
+// ---------- 搜索 ----------
 
 const query = ref("");
+/** 检索范围：空串 = 全部岗位，否则按语料 category 过滤 */
+const scope = ref<"" | "java" | "frontend">("");
 const mode = ref<"hybrid" | "bm25" | "vector">("hybrid");
 const searching = ref(false);
 const result = ref<KnowledgeSearchResult | null>(null);
@@ -268,7 +356,10 @@ const runSearch = async () => {
   if (!q || searching.value) return;
   searching.value = true;
   try {
-    result.value = await searchKnowledge(q, { mode: mode.value });
+    result.value = await searchKnowledge(q, {
+      mode: mode.value,
+      jobCode: scope.value || undefined,
+    });
   } catch (e) {
     result.value = null;
     void alertDialog("检索失败", e instanceof Error ? e.message : String(e));

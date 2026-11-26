@@ -87,6 +87,36 @@ public class InterviewSession {
     @Column(name = "reply_length_mode", length = 16)
     private String replyLengthMode = "normal";
 
+    /**
+     * 舞台媒体状态（issue #13）：背景 / 背景特效 / BGM / 音效 / 环境音 / 展示图片的
+     * 最后一次快照，JSON 字符串。
+     *
+     * <p>对应原版 {@code game_status} 里的同名字段（原版靠存档恢复，本项目直接用场次行）。
+     * 写入点集中在 {@code media/MediaStateStore}，由剧本事件调用；引擎每个事件结束后
+     * 的 {@code persist} 顺带落库，刷新后前端读 {@code GET /api/sessions/{id}} 即可恢复。
+     */
+    @Column(name = "media_state", columnDefinition = "CLOB")
+    private String mediaState;
+
+    /**
+     * 自由面试：面试官从候选人自述里识别出的岗位编码（对应 interview_question.job_code）。
+     * 剧本场次恒为 NULL。
+     */
+    @Column(name = "free_job_code", length = 32)
+    private String freeJobCode;
+
+    /** 自由面试：当前正在聊的题目 id；还没识别出岗位时为 NULL。 */
+    @Column(name = "free_current_question_id")
+    private Long freeCurrentQuestionId;
+
+    /** 自由面试：本场已经问过的题目 id，逗号分隔（抽题时排除，避免重复）。 */
+    @Column(name = "free_asked_question_ids", length = 1024)
+    private String freeAskedQuestionIds;
+
+    /** 自由面试：当前题目已经被追问了几轮；到上限后换下一题。 */
+    @Column(name = "free_question_turns")
+    private Integer freeQuestionTurns = 0;
+
     public Long getId() {
         return id;
     }
@@ -229,5 +259,45 @@ public class InterviewSession {
 
     public void setReplyLengthMode(String replyLengthMode) {
         this.replyLengthMode = replyLengthMode;
+    }
+
+    public String getMediaState() {
+        return mediaState;
+    }
+
+    public void setMediaState(String mediaState) {
+        this.mediaState = mediaState;
+    }
+
+    public String getFreeJobCode() {
+        return freeJobCode;
+    }
+
+    public void setFreeJobCode(String freeJobCode) {
+        this.freeJobCode = freeJobCode;
+    }
+
+    public Long getFreeCurrentQuestionId() {
+        return freeCurrentQuestionId;
+    }
+
+    public void setFreeCurrentQuestionId(Long freeCurrentQuestionId) {
+        this.freeCurrentQuestionId = freeCurrentQuestionId;
+    }
+
+    public String getFreeAskedQuestionIds() {
+        return freeAskedQuestionIds;
+    }
+
+    public void setFreeAskedQuestionIds(String freeAskedQuestionIds) {
+        this.freeAskedQuestionIds = freeAskedQuestionIds;
+    }
+
+    public Integer getFreeQuestionTurns() {
+        return freeQuestionTurns;
+    }
+
+    public void setFreeQuestionTurns(Integer freeQuestionTurns) {
+        this.freeQuestionTurns = freeQuestionTurns;
     }
 }

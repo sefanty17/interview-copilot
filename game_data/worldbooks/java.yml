@@ -1,0 +1,37 @@
+# 世界书：Java 后端岗位背景（issue #1 世界书半）
+# 使用时整条注入 system 提示词，不参与检索；真相源是本文件，重启后由启动扫描入库。
+name: Java 后端岗位背景
+description: 校招 Java 后端岗的公司、团队与技术栈设定，供面试官追问时引用。
+job_code: java
+entries:
+  - id: company
+    name: 公司背景
+    priority: 10
+    activation: { type: always }
+    content: |-
+      你所在的公司是一家做企业级 SaaS 的中型互联网公司，客户以制造业和零售业的中大型企业为主。
+      技术团队约 300 人，后端以 Java 为主，目前正在把单体应用逐步拆成微服务。
+
+  - id: role
+    name: 岗位职责
+    priority: 10
+    activation: { type: always }
+    content: |-
+      这个岗位是校招 Java 后端开发：参与订单与结算服务的开发，要求熟悉 JVM、并发、
+      Spring 生态和 MySQL，能在导师带领下独立负责一个中等规模的模块。
+
+  - id: stack
+    name: 技术栈
+    priority: 5
+    activation: { type: keyword, keys: [技术栈, 框架, Spring, 中间件, 部署] }
+    content: |-
+      后端技术栈：Java 17、Spring Boot 3、MyBatis-Plus、MySQL 8、Redis 7、RocketMQ、Kubernetes。
+      监控用 Prometheus + Grafana，日志走 ELK，发布走蓝绿部署。
+
+  - id: process
+    name: 面试流程
+    priority: 1
+    activation: { type: keyword, keys: [面试, 流程, 几轮, 多久] }
+    content: |-
+      面试共三轮：一轮基础与项目，二轮场景与设计，三轮 HR 面。
+      每轮 40 分钟，先让候选人自我介绍，再围绕简历里的项目逐层深挖。

@@ -6,6 +6,23 @@
       </template>
 
       <div class="flex min-h-0 flex-col gap-5">
+        <!--
+          issue #10 要求把局限说在前面。这条不能省：评委/用户听到「面试官会说话」时的
+          默认预期是「每个角色有自己的声线、带情绪变化」，那是原版 LingChat 用
+          角色卡绑音色模型做到的；本项目走云端/本地 TTS 引擎，能做到「按情绪参数合成」，
+          但同一引擎下不同角色的声音取决于音色配置，不是角色卡自带的专属声线。
+          与其让对方自己发现落差，不如先讲清楚承诺边界。
+        -->
+        <p
+          class="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[11px] leading-relaxed text-white/45"
+        >
+          <span class="font-semibold text-white/70">关于音色的说明：</span>
+          本项目的语音播报由 TTS 引擎合成（云端或本地），能按情绪参数调整语气，
+          但<b>不是</b>原版 LingChat 那种「每个角色绑定专属声线模型」的效果。
+          同一个引擎下不同面试官的声音差异取决于你为它选的音色，而不是角色卡里自带的声线。
+          承诺的边界是「能听见面试官说话」，不是「角色定制配音」。
+        </p>
+
         <div class="flex flex-wrap items-center gap-x-6 gap-y-4 border-b border-white/10 pb-5">
           <button
             type="button"
@@ -657,7 +674,7 @@ import {
 import { MenuItem, MenuPage } from "../../ui";
 import { store, updateSettings } from "../../../store/appStore";
 import { alertDialog } from "../../../store/dialogStore";
-import type { SiteSettings } from "../../../data/mock";
+import type { SiteSettings } from "../../../types/domain";
 
 type SettingValue = string | number | boolean;
 type EngineFieldType = "text" | "password" | "number" | "range" | "select" | "file" | "switch";

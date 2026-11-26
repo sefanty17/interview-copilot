@@ -16,8 +16,8 @@
  */
 import { reactive, computed } from "vue";
 import { createChapter, createScript } from "../../../store/scriptEditor";
-import { jobs } from "../../../data/mock";
-import { interviewers } from "../../../data/interviewers";
+import { jobs } from "../../../data/jobs";
+import { interviewers } from "../../../store/interviewers";
 
 const props = defineProps<{
   modal: "script" | "chapter" | null;

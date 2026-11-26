@@ -33,7 +33,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import GameRoleAvatar from "./GameRoleAvatar.vue";
-import { interviewers } from "../../data/interviewers";
+import { interviewers } from "../../store/interviewers";
 import { roomStore } from "../../store/roomStore";
 
 interface RoleSlot {

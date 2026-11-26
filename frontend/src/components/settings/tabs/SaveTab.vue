@@ -92,7 +92,7 @@ import { useRouter } from "vue-router";
 import MenuItem from "../MenuItem.vue";
 import { confirmDialog } from "../../../store/dialogStore";
 import { currentJob, currentPersona, notify, persist, store } from "../../../store/appStore";
-import type { InterviewRecord } from "../../../data/mock";
+import type { InterviewRecord } from "../../../types/domain";
 
 const router = useRouter();
 
@@ -123,7 +123,7 @@ function createSave() {
   store.records.unshift({
     id: `r-${Date.now()}`,
     jobName: name,
-    personaName: `${currentPersona.value.name} · ${currentPersona.value.title}`,
+    personaName: `${currentPersona.value.name} · ${currentPersona.value.displayRole}`,
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
     duration: "00 分 00 秒",
     score: 0,

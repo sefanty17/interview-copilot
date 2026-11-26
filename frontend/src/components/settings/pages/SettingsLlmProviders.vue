@@ -716,11 +716,8 @@ import { ChevronDown, ChevronLeft, Cpu, RotateCw, X } from "@lucide/vue";
 import { MenuItem, MenuPage } from "../../ui";
 import { store, notify, updateSettings } from "../../../store/appStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
-import {
-  llmPresets as presets,
-  type LlmPreset,
-  type LlmProviderConfig,
-} from "../../../data/mock";
+import { llmPresets as presets } from "../../../constants/llmPresets";
+import type { LlmPreset, LlmProviderConfig } from "../../../types/domain";
 
 /** 未接入后端时的统一提示语 */
 const NEED_BACKEND = "需要后端服务，当前未接入";

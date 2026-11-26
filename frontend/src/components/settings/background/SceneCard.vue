@@ -86,7 +86,7 @@
 import { computed, ref, watch, type Component } from "vue";
 import { ImageOff, CircleHelp, Home, Star, TreePine, Wrench } from "@lucide/vue";
 import PluginTag from "../../ui/PluginTag.vue";
-import type { SceneInfo } from "../../../data/mock";
+import type { SceneInfo } from "../../../types/domain";
 
 const props = defineProps<{
   scene: SceneInfo;

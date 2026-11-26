@@ -36,7 +36,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { interviewers } from "../../../../data/interviewers";
+import { interviewers } from "../../../../store/interviewers";
 import {
   aiKey,
   getRoleRelations,

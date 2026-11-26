@@ -37,19 +37,37 @@
           <template v-else>
             <span class="text-white/85">自由面试</span>
             <span class="text-white/40">·</span>
-            <span class="text-white/70">第 {{ answeredCount + 1 }} 轮</span>
+            <span class="text-white/70">{{ freeState?.jobName ?? "岗位待确认" }}</span>
+            <template v-if="freeState?.question">
+              <span class="text-white/40">·</span>
+              <span class="text-[#79d9ff]">第 {{ freeState.askedCount }} 题</span>
+            </template>
           </template>
           <span class="text-white/40">·</span>
           <span class="font-mono tabular-nums text-white/85">{{ timerText }}</span>
         </div>
-        <!-- 批次 4.5：自由对话模式的评分说明（与现有提示文案同款样式） -->
+        <!-- 自由面试：题库检索结果（岗位 + 当前题所属知识点）；还没识别岗位时提示流程 -->
         <div v-if="!isScript" class="mt-1 text-xs text-white/60">
-          自由对话模式 · 本模式不产生评分，仅用于对话体验
+          <template v-if="freeState?.question">
+            题库 · {{ freeState.question.type }} · {{ anyKpName(freeState.question.kp) }} · 第
+            {{ freeState.askedCount }} / {{ freeState.questionCount }} 题
+          </template>
+          <template v-else-if="freeState?.jobCode"
+            >面试官会围绕 {{ freeState.jobName }} 的常见考点自由提问（该岗位题库暂未收录）</template
+          >
+          <template v-else>面试官会先问你想面的岗位，再从题库随机抽题</template>
         </div>
         <div v-if="isScript" class="mt-2 ml-auto h-[3px] w-40 overflow-hidden rounded-full bg-white/15">
           <div class="h-full rounded-full bg-[#79d9ff] transition-all duration-500" :style="{ width: (scriptChapter ? scriptProgressPct : progress) + '%' }" />
         </div>
       </div>
+      <!-- 回复长度档位（issue #16 / A4）：只在自由对话显示，剧本节奏由剧本写死 -->
+      <ReplyLengthPicker
+        v-if="!isScript"
+        :model-value="replyLengthMode"
+        :busy="replyLengthSaving"
+        @update:model-value="changeReplyLengthMode"
+      />
       <button class="nav-btn" @click="endNow">结束面试</button>
       <button class="nav-btn" title="设置" @click="openSettings">
         <Icon :icon="'setting'" :size="18" />
@@ -110,19 +128,30 @@ import FreeModeTools from "../components/tools/FreeModeTools.vue";
 import StatusInfoBar from "../components/tools/StatusInfoBar.vue";
 import ToolActivityStatus from "../components/tools/ToolActivityStatus.vue";
 import FullAccessWarning from "../components/tools/FullAccessWarning.vue";
-import { dimensionNames, jobs, questions as questionBank, type InterviewRecord } from "../data/mock";
-import { findInterviewer } from "../data/interviewers";
-import { confirmDialog } from "../store/dialogStore";
+import { dimensionNames, questions as questionBank } from "../data/questions";
+import { jobs } from "../data/jobs";
+import type { InterviewRecord, Question } from "../types/domain";
+import { fetchQuestions, type QuestionItem } from "../api/questions";
+import { findInterviewer } from "../store/interviewers";
+import { findScript } from "../data/scripts";
+import { alertDialog, confirmDialog } from "../store/dialogStore";
 import {
   createSession,
+  fetchFreeState,
+  fetchImpression,
+  fetchReplyLengthMode,
   fetchSessionDetail,
   finishSession,
   isBackendUp,
+  saveReplyLengthMode,
   sendMessage,
   startScript,
   submitScriptChoice,
   submitScriptInput,
+  type FreeState,
+  type ImpressionView,
   type ReplyEvent,
+  type ReplyLengthMode,
   type SessionDetail,
   type StreamEvent,
   type VoiceEvent,
@@ -147,21 +176,90 @@ import {
   type RoomLine,
 } from "../store/roomStore";
 import { attachRoomAudio } from "../store/roomAudio";
+import {
+  applyMediaState,
+  forgetActiveSession,
+  readActiveSession,
+  rememberActiveSession,
+} from "../store/mediaRestore";
 import Icon from "../components/base/widget/Icon.vue";
+import ReplyLengthPicker from "../components/game/ReplyLengthPicker.vue";
 import { applyPendingChoice, runScriptStream } from "../composables/useScriptRunner";
+import { applyImpression, resetImpression } from "../store/impressionStore";
 import { useVoicePlayback } from "../composables/useVoicePlayback";
+import { setStopVoiceBeforeRecording, setVoicePlaying } from "../composables/asr";
 import { cardForCode, ensureCharactersLoaded } from "../store/characters";
 
 const router = useRouter();
 const route = useRoute();
 
-/** AI 台词的语音播放器（单一 <audio> 复用；剧本台词的语音留到后续批次，本批不接） */
-const playback = useVoicePlayback();
+/**
+ * AI 台词的语音播放器（单一 `<audio>` 复用；剧本台词的语音留到后续批次，本批不接）。
+ *
+ * <p>回调把「正在播」同步给 ASR 门控：{@code setVoicePlaying(true)} 会停掉能量监测并
+ * 丢弃在飞的录音（那是在录 AI 的声音），播完再恢复监听。这一步是 issue #10
+ * 「按麦克风时朗读立即停止」的落点——<b>先停朗读</b>（由 stopWhenRecording 做），
+ * <b>再让门控知道此刻不该录</b>。
+ */
+const playback = useVoicePlayback((playing) => setVoicePlaying(playing));
 
 const historyOpen = ref(false);
 const finished = ref(false);
 const autoFinish = ref(false);
 const elapsed = ref(0);
+
+/** 自由面试状态（后端识别出的岗位 + 当前题目）；剧本场次保持 null */
+const freeState = ref<FreeState | null>(null);
+
+/**
+ * 回复长度档位（issue #16 / A4）。
+ *
+ * <p>{@code null} = 还没读到（场次未建 / 试玩会话 / 后端不可用）。试玩会话后端返回
+ * {@code mode:null}，此时选择器按「正常」展示但不允许写——写入会被后端 409 拒掉。
+ */
+const replyLengthMode = ref<ReplyLengthMode | null>(null);
+const replyLengthSaving = ref(false);
+
+/** 读一次当前档位；失败静默（房间照常能聊，档位显示默认值）。 */
+async function loadReplyLengthMode(): Promise<void> {
+  const id = sessionId.value;
+  if (id === null) return;
+  try {
+    replyLengthMode.value = await fetchReplyLengthMode(id);
+  } catch (error) {
+    console.warn("[interview] 读取回复档位失败，按默认展示", error);
+    replyLengthMode.value = null;
+  }
+}
+
+/**
+ * 切档位：先乐观更新再发请求，失败回滚并提示。
+ *
+ * <p>乐观更新的理由是这个控件在聊天过程中高频使用，等一个往返再变会有明显迟滞；
+ * 失败时把原值还回去，用户看到提示能马上重试。
+ *
+ * <p>这里刻意<b>不用 watch 监听 replyLengthMode</b>：本方法自己会改这个 ref，
+ * 用 watch 会形成「改→请求→再改→再请求」的循环。选择器只 emit，落库在这里做。
+ */
+async function changeReplyLengthMode(next: ReplyLengthMode): Promise<void> {
+  const id = sessionId.value;
+  if (id === null || replyLengthSaving.value || next === replyLengthMode.value) return;
+  const previous = replyLengthMode.value;
+  replyLengthMode.value = next;
+  replyLengthSaving.value = true;
+  try {
+    replyLengthMode.value = await saveReplyLengthMode(id, next);
+  } catch (error) {
+    replyLengthMode.value = previous;
+    console.warn("[interview] 切换回复档位失败", error);
+    void alertDialog(
+      "切换回复档位失败",
+      error instanceof Error ? error.message : String(error),
+    );
+  } finally {
+    replyLengthSaving.value = false;
+  }
+}
 
 const persona = computed(() => findInterviewer(store.session.personaId));
 const job = computed(() => jobs.find((j) => j.id === store.session.jobId) ?? jobs[0]);
@@ -178,16 +276,73 @@ const card = computed(() => cardForCode(persona.value.code));
 /** 剧本面试才有固定题量；自由面试不设上限，用户点「结束面试」才收尾 */
 const isScript = computed(() => store.session.mode === "script");
 
-/** 题库：先按知识点偏好排序。剧本面试截取 settings.questionCount 道，自由面试用整份循环 */
+/** 题库：先按知识点偏好排序、按题面去重。剧本面试截取 settings.questionCount 道 */
+
+/**
+ * 后端题库（issue #1）：取到就用它，取不到回退本地题池。
+ *
+ * <p>回退不能删：断网时整个房间仍然要能演示，本地题池是最后一道保险。
+ */
+const remoteQuestions = ref<Question[]>([]);
+
+/** 后端题 → 房间内部使用的 {@link Question} 形状（字段一一对应，只做 id 类型适配）。 */
+function toLocalQuestion(item: QuestionItem): Question {
+  return {
+    // 本地题池的 id 是字符串，后端给的是自增主键，统一转成字符串保持形状一致
+    id: item.code || String(item.id),
+    jobId: item.jobCode,
+    kp: item.kp ?? "",
+    type: item.type ?? "",
+    difficulty: item.difficulty ?? "中等",
+    text: item.text,
+    reference: item.reference ?? "",
+    followUps: item.followUps ?? [],
+  };
+}
+
+/** 切岗位时重新取题；请求失败或返回空都静默回落本地题池，不打断面试。 */
+let questionLoadSeq = 0;
+async function loadQuestions(jobId: string): Promise<void> {
+  const seq = ++questionLoadSeq;
+  try {
+    const items = await fetchQuestions(jobId, { limit: 100 });
+    // 迟到的旧请求直接丢弃，避免切岗位后又被上一个岗位的题覆盖
+    if (seq !== questionLoadSeq) return;
+    remoteQuestions.value = items.map(toLocalQuestion);
+  } catch (error) {
+    if (seq !== questionLoadSeq) return;
+    console.warn("[interview] 后端题库不可用，改用本地题池", error);
+    remoteQuestions.value = [];
+  }
+}
+
 const questionPool = computed(() => {
-  const all = questionBank.filter((q) => q.jobId === store.session.jobId);
+  const all = remoteQuestions.value.length
+    ? remoteQuestions.value
+    : questionBank.filter((q) => q.jobId === store.session.jobId);
   const preferred = all.filter((q) => store.settings.kps.includes(q.kp));
   const rest = all.filter((q) => !preferred.includes(q));
-  const ordered = [...preferred, ...rest];
+  // 题库去重：同一道题可能被不同知识点重复收录，按题面文本去掉重复
+  const seen = new Set<string>();
+  const ordered = [...preferred, ...rest].filter((q) => {
+    const text = q.text.trim();
+    if (seen.has(text)) return false;
+    seen.add(text);
+    return true;
+  });
   if (!isScript.value) return ordered;
   const target = Math.max(3, Math.min(8, store.settings.questionCount));
   return ordered.slice(0, target);
 });
+
+// 岗位确定或切换时取一次后端题库（immediate：直接进房间时 jobId 已存在）
+watch(
+  () => store.session.jobId,
+  (jobId) => {
+    if (jobId) void loadQuestions(jobId);
+  },
+  { immediate: true },
+);
 
 const progress = computed(() => {
   if (!isScript.value || !questionPool.value.length) return 0;
@@ -305,15 +460,24 @@ function emitAi(
 function currentQuestion() {
   const pool = questionPool.value;
   if (!pool.length) return undefined;
-  const idx = isScript.value ? store.session.questionIndex : store.session.questionIndex % pool.length;
-  return pool[idx];
+  // 题库不循环：问完最后一道就收尾，避免同一道题换个顺序再问一遍
+  return pool[store.session.questionIndex];
 }
 
 function kpName(id: string) {
   return job.value.knowledgePoints.find((k) => k.id === id)?.name ?? id;
 }
 
-function feedbackFor(q: (typeof questionBank)[number], answer: string) {
+/** 题库按岗位存，知识点编码跨岗位都要认（自由面试的岗位由候选人自己报） */
+function anyKpName(id: string) {
+  for (const j of jobs) {
+    const hit = j.knowledgePoints.find((k) => k.id === id);
+    if (hit) return hit.name;
+  }
+  return id;
+}
+
+function feedbackFor(q: Question, answer: string) {
   const short = answer.trim().length < 26;
   if (short) {
     return "可以再展开一点吗？我想听到你的判断依据，而不只是结论。先说你的方案，再说为什么这样选、代价是什么。";
@@ -344,7 +508,7 @@ function askOpeningQuestion() {
 }
 
 /** 一轮 AI 回复：点评一句 + 下一问一句（单句推进，逐句 ▼） */
-function runAiTurn(q: (typeof questionBank)[number] | undefined, answer: string) {
+function runAiTurn(q: Question | undefined, answer: string) {
   if (finished.value) return;
   const short = answer.trim().length < 26;
   const first = roomStore.lines.length;
@@ -402,17 +566,57 @@ const scriptProgressPct = ref(0);
 async function ensureServerSession(): Promise<boolean> {
   if (sessionId.value !== null) return true;
   if (!(await isBackendUp())) return false;
+
+  // 刷新 / 重新进房间：先找回上一场仍在进行中的后端场次。
+  // 之前每次都新建，刷新后背景与 BGM 无从恢复（issue #13 的验收点）。
+  // 只在「本地已有对话历史」时续跑：从首页全新开一场时不能把旧场次认成新的。
+  const active = readActiveSession();
+  if (active && store.session.messages.length > 1) {
+    try {
+      const detail = await fetchSessionDetail(active.sessionId);
+      if (detail.status === "running") {
+        sessionId.value = detail.id;
+        boundScriptCode.value = detail.scriptCode ?? null;
+        applyMediaState(detail.mediaState);
+        return true;
+      }
+    } catch {
+      /* 场次已被删除 / 后端重启后清库：落到下面新建 */
+    }
+    forgetActiveSession();
+  }
+
   try {
     // 剧本模式带上「剧本冒险」里选中的剧本 code；自由模式不传（后端不再按岗位自动绑剧本）
-    const scriptCode =
-      store.session.mode === "script" ? localStorage.getItem("bondScript") || undefined : undefined;
+    const scriptMode = store.session.mode === "script";
+    const scriptCode = scriptMode ? localStorage.getItem("bondScript") || undefined : undefined;
+    // 专项训练：练习计划进入时在 bondFocus 里带「维度 + 当天要点」，普通剧本入口没有这个键
+    let focus: { code?: string; label?: string; brief?: string } | null = null;
+    try {
+      const rawFocus = scriptMode ? localStorage.getItem("bondFocus") : null;
+      focus = rawFocus ? JSON.parse(rawFocus) : null;
+    } catch {
+      focus = null;
+    }
+    const bond = scriptCode
+      ? store.scripts.find((s) => s.code === scriptCode) ?? findScript(scriptCode)
+      : undefined;
     const result = await createSession({
-      interviewerCode: store.settings.personaId,
-      jobId: store.settings.jobId,
+      // 剧本场次以本场选择为准：岗位跟剧本 job_code，面试官用「剧本冒险」里选的角色；
+      // 否则后端会落成设置页里的全局岗位/面试官（典型表现为打了前端剧本却显示 java/风雪）。
+      interviewerCode: scriptMode ? store.session.personaId : store.settings.personaId,
+      jobId: scriptMode ? bond?.job_code ?? store.session.jobId : store.settings.jobId,
       scriptCode,
+      focusCode: focus?.code,
+      focusLabel: focus?.label,
+      focusBrief: focus?.brief,
     });
     sessionId.value = result.sessionId;
     boundScriptCode.value = scriptCode ?? null;
+    // 新场次从零开始：印象按「场次 + 面试官」存，不继承上一场
+    resetImpression();
+    // 记住这一场：刷新后靠它续回同一个后端场次（媒体状态 / 章节进度都挂在它上面）
+    rememberActiveSession(result.sessionId, scriptCode ?? null);
     // 开场白以刚建出来的场次为准（startSession 会先在本地塞一条同文案的开场，这里换成后端的）
     const seededOpeningOnly =
       store.session.messages.length === 1 &&
@@ -485,6 +689,12 @@ async function sendToBackend(text: string): Promise<boolean> {
         const data = ev.data as VoiceEvent;
         if (!data?.voiceUrl || data.seq == null) continue;
         pendingVoices.set(data.seq, data.voiceUrl);
+      } else if (ev.event === "ai:question") {
+        // 自由面试：识别到岗位 / 换题时后端推来新状态，抬头立刻变成「岗位 + 第几题」
+        freeState.value = ev.data as FreeState;
+      } else if (ev.event === "ai:impression") {
+        // 面试印象：后端每 3 条回答评估一次，推来六维最新值与本次增量
+        applyImpression(ev.data as ImpressionView);
       } else if (ev.event === "ai:error") {
         console.warn("[interview] ai:error", ev.data);
       }
@@ -523,6 +733,35 @@ async function sendToBackend(text: string): Promise<boolean> {
 }
 
 /**
+ * 自由面试状态：刷新 / 重进房间时从后端恢复（岗位 + 当前题 + 题数）。
+ * 后端不可用或剧本场次时静默跳过，抬头回落到「岗位待确认」。
+ */
+async function refreshFreeState() {
+  const id = sessionId.value;
+  if (id === null) return;
+  try {
+    const state = await fetchFreeState(id);
+    if (state.free) freeState.value = state;
+  } catch (error) {
+    console.warn("[interview] 拉取自由面试状态失败", error);
+  }
+}
+
+/**
+ * 面试印象：刷新 / 重进房间时从后端恢复当前面试官的六维值。
+ * 后端不可用时静默跳过，面板保持「暂无数据」。
+ */
+async function refreshImpression() {
+  const id = sessionId.value;
+  if (id === null) return;
+  try {
+    applyImpression(await fetchImpression(id));
+  } catch (error) {
+    console.warn("[interview] 拉取面试印象失败", error);
+  }
+}
+
+/**
  * 消费一段剧本事件流（开演 / 输入 / 选项三条入口共用）。返回 true 表示后端已经接管
  * 这次提交（产出了台词，或已停在某处等输入），不要再走本地假回复；false 交回 handleSend 降级。
  *
@@ -537,7 +776,17 @@ async function runScript(stream: AsyncGenerator<StreamEvent>): Promise<boolean> 
     onChapter: (c) => (scriptChapter.value = c),
     onProgress: (p) => (scriptProgressPct.value = p),
     onEnd: () => (autoFinish.value = true),
-    onError: (payload) => console.warn("[interview] ai:error", payload),
+    onImpression: (view) => applyImpression(view as ImpressionView),
+    onError: (payload) => {
+      console.warn("[interview] ai:error", payload);
+      // 剧本推进出错时后端不会再给台词：必须自己退出「思考中」，并告诉用户原因
+      roomStore.state = "input";
+      const detail =
+        typeof payload === "string"
+          ? payload
+          : (payload as { message?: string } | null)?.message ?? "后端剧本推进失败";
+      void alertDialog("面试中断", detail);
+    },
   });
 }
 
@@ -589,7 +838,9 @@ async function enterScriptScene(): Promise<void> {
     return;
   }
 
-  // 刷新续跑：本地 syncRoomFromSession 的结果为准，不重放，也不自动开演
+  // 刷新续跑：把后端快照里的背景 / 特效 / BGM / 环境音 / 浮层拨回事件切换时的样子，
+  // 再停在输入态等用户发言（不重放，也不自动开演）
+  applyMediaState(detail?.mediaState);
   roomStore.state = "input";
 }
 
@@ -667,23 +918,28 @@ async function finish() {
   if (pending) window.clearTimeout(pending);
 
   const pool = questionPool.value;
-  const total = Math.max(1, answeredCount.value);
-  // 自由面试题库会循环，按取模还原实际问过的题序
-  const answered = Array.from({ length: total }, (_, i) => pool[isScript.value ? i : i % (pool.length || 1)])
-    .filter((q): q is (typeof questionBank)[number] => !!q);
+  // 有效作答轮次；不足 3 轮视为无效面试，分数一律 0（不再给 79+n%4 的假分）
+  // 自由面试按真实用户台词数算（刷新后续上的场次也不会因 questionIndex 归零被误判为无效）
+  const answeredTurns = isScript.value
+    ? answeredCount.value
+    : store.session.messages.filter((m) => m.role === "user").length;
+  const tooShort = answeredTurns < 3;
+  const total = tooShort ? 0 : Math.max(1, answeredTurns);
+  // 题库不再循环，实际问过的就是前 answeredTurns 道
+  const answered = pool.slice(0, total).filter((q): q is Question => !!q);
   const base = 79 + (answered.length % 4);
   const dims = dimensionNames.map((name, i) => ({
     name,
-    score: clamp(base + [5, -3, 7, 8, 1][i]),
+    score: tooShort ? 0 : clamp(base + [5, -3, 7, 8, 1][i]),
   }));
-  const mockScore = clamp(dims.reduce((sum, d) => sum + d.score, 0) / dims.length);
+  const mockScore = tooShort ? 0 : clamp(dims.reduce((sum, d) => sum + d.score, 0) / dims.length);
 
   // 后端在线 → 用后端算出的总分；调用失败则退回本地 mock 分数（降级不能删）
   let score = mockScore;
   if (sessionId.value !== null) {
     try {
       const result = await finishSession(sessionId.value);
-      if (typeof result.score === "number") score = clamp(result.score);
+      if (typeof result.score === "number" && !tooShort) score = clamp(result.score);
     } catch (error) {
       console.warn("[interview] 结束场次失败，沿用本地分数", error);
     }
@@ -691,9 +947,19 @@ async function finish() {
 
   // clearSession() 会清掉本地会话缓存，先把场次 id 取出来，跳转时要拼进 ?sid=
   const sid = sessionId.value;
+  clearSession();
+  // 这一场已经结束：别让下次进房间把它当成「还在进行中的场次」续回来
+  forgetActiveSession();
+
+  // 后端已建场次：记录由后端统一提供，本地不再写一份，否则「面试记录」里同一场会出现两条
+  // （一条后端真实场次、一条本地 mock 分条目）。作答不足 3 轮时带 noeval=1，报告页不跑 AI 评估，分数保持 0。
+  if (sid !== null) {
+    router.push(`/report/s-${sid}?sid=${sid}${tooShort ? "&noeval=1" : ""}`);
+    return;
+  }
+
   const record: InterviewRecord = {
     id: `r-${Date.now()}`,
-    sessionId: sid ?? undefined,
     jobName: job.value.name,
     personaName: `${persona.value.name} · ${persona.value.displayRole}`,
     date: new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-"),
@@ -716,8 +982,7 @@ async function finish() {
   };
 
   addRecord(record);
-  clearSession();
-  router.push(sid ? `/report/${record.id}?sid=${sid}` : `/report/${record.id}`);
+  router.push(`/report/${record.id}`);
 }
 
 /** 把 session.messages 还原成房间句子队列（刷新/挂载恢复）
@@ -752,6 +1017,9 @@ let disposeAudio: (() => void) | undefined;
 onMounted(async () => {
   // 角色卡（显示层数据源）：懒加载一次即可，失败不拦房间演出
   void ensureCharactersLoaded();
+  // issue #10：开始录音前先停掉正在播的 TTS。注册回调而不是让 ASR 直接 import
+  // 播放器——ASR 在 GameDialog 里用，反向依赖会形成环。
+  setStopVoiceBeforeRecording(() => playback.stop());
   if (route.query.resume) resumeSession();
   // 直接访问 /interview（没有 session 内容）时兜底建一场，沿用已有 mode（缺省 free）
   if (!store.session.messages.length) {
@@ -781,11 +1049,18 @@ onMounted(async () => {
   // 后端可用 → 用模型开场白并等用户输入；不可用 → 保留原来的本地开场问题
   const online = await ensureServerSession();
   if (online) {
+    // 印象按场次存：刷新 / 重进时恢复面板，之后的更新走 ai:impression
+    void refreshImpression();
+    // 回复档位跟场次走：刷新后右上角要显示上次选的档位，而不是默认「正常」
+    void loadReplyLengthMode();
     // 剧本模式：接剧本引擎（advance 链路）
     if (store.session.mode === "script") {
       await enterScriptScene();
       return;
     }
+    // 自由面试：恢复已识别出的岗位与当前题（全新场次时后端返回 free + 空题，
+    // 抬头先显示「岗位待确认」，等候选人自述后由 ai:question 更新）
+    void refreshFreeState();
     roomStore.cursor = Math.max(0, roomStore.lines.length - 1);
     roomStore.state = roomStore.lines.length ? "responding" : "input";
     return;
@@ -807,6 +1082,9 @@ onBeforeUnmount(() => {
   if (pending) window.clearTimeout(pending);
   disposeViewport?.();
   disposeAudio?.();
+  // 先解除 ASR 的回调再释放播放器：顺序反过来的话，回调里拿到的可能是已经销毁的元素
+  setStopVoiceBeforeRecording(null);
+  setVoicePlaying(false);
   playback.dispose();
   delete (window as unknown as Record<string, unknown>).__setPresentRoles;
   resetRoom();

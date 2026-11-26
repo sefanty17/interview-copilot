@@ -21,6 +21,9 @@ public interface InterviewMessageRepository extends JpaRepository<InterviewMessa
     /** 统计某角色的条数（验收 / 联调用）。 */
     long countBySessionIdAndRole(Long sessionId, String role);
 
+    /** 统计「候选人真正说的话」：旁白 / 剧情提示也借用 role=user，必须按 msgType 排掉。 */
+    long countBySessionIdAndRoleAndMsgType(Long sessionId, String role, String msgType);
+
     /** 当前最大 seq；空场次返回 0，省掉一次 null 判断。 */
     @Query("select coalesce(max(m.seq), 0) from InterviewMessage m where m.sessionId = :sessionId")
     int findMaxSeqBySessionId(@Param("sessionId") Long sessionId);

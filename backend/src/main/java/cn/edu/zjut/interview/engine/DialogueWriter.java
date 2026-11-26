@@ -35,8 +35,9 @@ public final class DialogueWriter {
     private DialogueWriter(EngineContext ctx, Integer userMessageSeq) {
         this.ctx = ctx;
         this.userMessageSeq = userMessageSeq;
-        // 合并阈值 / 回复段数同上位设置（chat.merge_threshold / chat.reply_count）
-        this.splitter = new SentenceSplitter(ctx.tuning().mergeThreshold(), ctx.tuning().replyCount());
+        // 句数上限仍按 chat.reply_count；不做跨台词合并——合并会把「短转场 + 提问」并成一个
+        // 句子，后续解析只能取到第一段，提问就被静默丢掉。
+        this.splitter = new SentenceSplitter(0, ctx.tuning().replyCount());
     }
 
     /**

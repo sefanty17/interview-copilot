@@ -15,7 +15,7 @@
         >
           <div class="px-4 py-2 text-xs text-white/50">面试官</div>
           <p v-if="roles.length === 0" class="px-4 text-sm text-white/60">
-            当前没有可检视的面试官（先在对话里让面试官上场）
+            永久记忆调试尚未接入后端
           </p>
           <button
             v-for="role in roles"
@@ -503,15 +503,26 @@ import { MenuItem, MenuPage } from "../../ui";
 import { Button } from "../../base";
 import { notify } from "../../../store/appStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
-import {
-  memoryDebugOverview,
-  memoryDebugSnapshots,
-  type MemoryDebugRole,
-  type MemoryDebugSnapshot,
-  type MemoryEntry,
-  type MemoryImportance,
-  type MemorySectionKey,
-} from "../../../data/mock";
+import type {
+  MemoryDebugOverview,
+  MemoryDebugRole,
+  MemoryDebugSnapshot,
+  MemoryEntry,
+  MemoryImportance,
+  MemorySectionKey,
+} from "../../../types/domain";
+
+/**
+ * 后端暂无永久记忆调试接口：概览恒为空、没有任何面试官快照，
+ * 页面据此显示「尚未接入后端」空态。
+ */
+const EMPTY_OVERVIEW: MemoryDebugOverview = {
+  currentRoleId: null,
+  activeSavePersistent: false,
+  activeSaveId: "",
+  roles: [],
+};
+const EMPTY_SNAPSHOTS: Record<number, MemoryDebugSnapshot> = {};
 
 /** 运行时生效值 = 底稿快照 + 本页可改的演示状态 */
 type MemoryRuntime = MemoryDebugSnapshot & { roleId: number };
@@ -552,7 +563,7 @@ const IMPORTANCE_FILTERS: { value: MemoryImportance | "all"; label: string }[] =
   { value: "low", label: "低" },
 ];
 
-const overview = ref<typeof memoryDebugOverview | null>(null);
+const overview = ref<MemoryDebugOverview | null>(null);
 const snapshot = ref<MemoryDebugSnapshot | null>(null);
 const selectedRoleId = ref<number | null>(null);
 const loading = ref(false);
@@ -832,7 +843,7 @@ async function rebuildIndex(): Promise<void> {
 }
 
 const loadSnapshot = (roleId: number) => {
-  const base = memoryDebugSnapshots[roleId];
+  const base = EMPTY_SNAPSHOTS[roleId];
   if (!base) {
     snapshot.value = null;
     error.value = "";
@@ -851,7 +862,7 @@ const refreshAll = () => {
   loading.value = true;
   error.value = "";
   try {
-    const data = memoryDebugOverview;
+    const data = EMPTY_OVERVIEW;
     overview.value = data;
     // currentRoleId 可能为 null，或已不在列表里（面试官离场）——
     // 命中才选中，否则退回第一项，避免详情留下空白卡片。

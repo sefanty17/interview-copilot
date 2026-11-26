@@ -69,14 +69,73 @@ public final class Worldbook {
             this.activation = activation;
             this.content = content;
         }
+
+        public String id() {
+            return id;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        public int priority() {
+            return priority;
+        }
+
+        /** true = always 常驻；false = keyword 关键词命中。 */
+        public boolean always() {
+            return activation.always;
+        }
+
+        /** keyword 条目的关键词；always 条目为空列表。 */
+        public List<String> activationKeys() {
+            return List.copyOf(activation.keys);
+        }
+
+        public String content() {
+            return content;
+        }
     }
 
     private final String name;
+    private final String description;
+    private final String jobCode;
     private final List<Entry> entries;
 
-    private Worldbook(String name, List<Entry> entries) {
+    private Worldbook(String name, String description, String jobCode, List<Entry> entries) {
         this.name = name;
+        this.description = description;
+        this.jobCode = jobCode;
         this.entries = entries;
+    }
+
+    /** 供 {@link WorldbookLoader} 从两张表组装（同包可见，不对外暴露构造细节）。 */
+    static Worldbook of(String name, String description, String jobCode, List<Entry> entries) {
+        return new Worldbook(name, description, jobCode, entries);
+    }
+
+    /** 书名（YAML {@code name}），可为空。 */
+    public String name() {
+        return name;
+    }
+
+    /** 一句话简介（YAML {@code description}，本项目扩展字段），可为空。 */
+    public String description() {
+        return description;
+    }
+
+    /** 岗位编码（YAML {@code job_code}，可空）；按岗位注入时由 {@link WorldbookLoader} 保证非空。 */
+    public String jobCode() {
+        return jobCode;
+    }
+
+    /** 条目列表，按 YAML 文件顺序（不可变视图）。 */
+    public List<Entry> entries() {
+        return List.copyOf(entries);
     }
 
     /**
@@ -92,6 +151,8 @@ public final class Worldbook {
                 throw new IllegalArgumentException("顶层必须是对象");
             }
             String name = optionalString(rootMap.get("name"));
+            String description = optionalString(rootMap.get("description"));
+            String jobCode = optionalString(rootMap.get("job_code"));
             Object rawEntries = rootMap.get("entries");
             if (!(rawEntries instanceof List<?> entryList)) {
                 throw new IllegalArgumentException("entries 必须是数组");
@@ -109,7 +170,7 @@ public final class Worldbook {
                 String content = requiredString(map.get("content"), "entry.content");
                 entries.add(new Entry(id, entryName, enabled, priority, activation, content));
             }
-            return new Worldbook(name, entries);
+            return new Worldbook(name, description, jobCode, entries);
         } catch (Exception e) {
             log.warn("世界书格式错误，跳过：{}", e.toString());
             return null;

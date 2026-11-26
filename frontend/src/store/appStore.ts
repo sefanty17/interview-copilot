@@ -1,15 +1,9 @@
 import { computed, reactive } from "vue";
-import { findInterviewer } from "../data/interviewers";
-import {
-  defaultSettings,
-  jobs,
-  mockRecords,
-  personas,
-  scenes as seedScenes,
-  type InterviewRecord,
-  type SceneInfo,
-  type SiteSettings,
-} from "../data/mock";
+import { findInterviewer } from "./interviewers";
+import { defaultSettings } from "../constants/defaultSettings";
+import { jobs } from "../data/jobs";
+import { scenes as seedScenes } from "../data/scenes";
+import type { InterviewRecord, SceneInfo, SiteSettings } from "../types/domain";
 import { seedScripts } from "../data/scripts";
 import type { InterviewScript } from "../data/scripts";
 
@@ -63,8 +57,12 @@ interface Persisted {
  * 本地存储版本。
  * v3：场景库由 9 条编造场景换成 3 条真实场景（booth / night / day）。旧存档里的假场景
  * 没有背景图（渐变占位已删），会渲染成「背景图缺失」，所以按版本整段重置 scenes。
+ * v4：清掉旧存档里残留的 3 条演示面试记录（r-1024 / r-1018 / r-1012）。
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
+
+/** 旧版 mockRecords 的三条演示记录 id：v4 迁移时从本地存档里剔除 */
+const DEMO_RECORD_IDS = new Set(["r-1024", "r-1018", "r-1012"]);
 
 /** load() 是否做过迁移：是则启动时立刻写回，避免每次刷新都重跑一遍 */
 let migrated = false;
@@ -96,7 +94,7 @@ const defaultState: Persisted = {
   schemaVersion: SCHEMA_VERSION,
   settings: { ...defaultSettings },
   scripts: JSON.parse(JSON.stringify(seedScripts)),
-  records: JSON.parse(JSON.stringify(mockRecords)),
+  records: [],
   session: createEmptySession(),
   scenes: JSON.parse(JSON.stringify(seedScenes)),
   sceneCategories: [],
@@ -124,16 +122,18 @@ function load(): Persisted {
     }
     if (version < SCHEMA_VERSION) migrated = true;
 
+    let records = Array.isArray(parsed.records) ? (parsed.records as InterviewRecord[]) : [];
+    // v4 迁移：示例记录混在用户真实记录里，按 id 精确剔除，其余原样保留
+    if (version < 4) records = records.filter((r) => !DEMO_RECORD_IDS.has(r.id));
+
     return {
       schemaVersion: SCHEMA_VERSION,
       settings,
       scripts: parsed.scripts?.length && parsed.scripts.every((s: any) => Array.isArray(s?.chapters))
         ? (parsed.scripts as InterviewScript[])
         : JSON.parse(JSON.stringify(seedScripts)),
-      // 存档记录以本地为准：用户删空后不应再回填示例数据（parsed.records 为数组即信任）
-      records: Array.isArray(parsed.records)
-        ? (parsed.records as InterviewRecord[])
-        : JSON.parse(JSON.stringify(mockRecords)),
+      // 存档记录以本地为准：没有记录就是空列表，不再回填示例数据
+      records,
       session: { ...createEmptySession(), ...(parsed.session ?? {}) },
       scenes,
       sceneCategories: Array.isArray(parsed.sceneCategories) ? parsed.sceneCategories : [],
@@ -296,8 +296,6 @@ export function deleteScript(code: string): void {
   }
 }
 
-export const currentPersona = computed(
-  () => personas.find((p) => p.id === store.settings.personaId) ?? personas[0],
-);
+export const currentPersona = computed(() => findInterviewer(store.settings.personaId));
 export const currentJob = computed(() => jobs.find((j) => j.id === store.settings.jobId) ?? jobs[0]);
 export const hasActiveSession = computed(() => store.session.active && store.session.messages.length > 0);

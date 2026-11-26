@@ -53,22 +53,29 @@ public class RetrievalService {
     /**
      * 阈值依据 {@code scripts/eval_knowledge.py --calibrate} 的 26 正 / 6 负实测分布：
      * <ul>
-     *   <li>BM25：正样本最低 2.47、负样本最高 2.69 —— 3.0 能拦掉全部负样本，
-     *       代价是「堆和栈分别放什么东西」「@Transactional 什么时候失效」这两条弱字面重合的问题查不到。
-     *       门槛是<b>注入</b>的门槛，宁漏不错：把无关内容塞进 prompt 比不塞更伤回答。</li>
+     *   <li>BM25：2026-11 语料扩到 35 篇 / 140 段后重新标定（{@code scripts/eval_knowledge.py --calibrate}）：
+     *       阈值 8.0 能拦掉全部 6 条负样本，26 条正样本仍全部通过。
+     *       旧 12 篇语料时门槛是 3.0（正样本最低 2.47 / 负样本最高 2.69）；
+     *       语料变大后，「春天 / 吃饭」这类无关问题会和某篇生僻双字词偶然重合、拿到 5~6 分，
+     *       3.0 已经拦不住。门槛是<b>注入</b>的门槛，宁漏不错：
+     *       把无关内容塞进 prompt 比不塞更伤回答。</li>
      *   <li>向量：正样本最低 0.132、负样本最高 0.184，<b>两堆重叠，hashing 实现下向量分不能当门槛</b>。
      *       0.30 只在「查询与片段字面高度重合」时才通过（实测 0.3~0.6），
      *       等于把实际筛选权交给 BM25；换真语义模型后这个值必须重新标定。</li>
      * </ul>
      */
     private static final double DEFAULT_MIN_VECTOR_SCORE = 0.30;
-    private static final double DEFAULT_MIN_BM25_SCORE = 3.0;
+    private static final double DEFAULT_MIN_BM25_SCORE = 8.0;
 
     /**
-     * 两路权重（加权 RRF 的投票权）。权重扫描结果（26 条正样本，Hit@1 / Hit@3 / MRR）：
+     * 两路权重（加权 RRF 的投票权）。旧 12 篇语料的扫描结果（26 条正样本，Hit@1 / Hit@3 / MRR）：
      * 0.0 → 96.2% / 96.2% / 0.969；0.2 → 96.2% / 100% / 0.974；0.4 → 92.3% / 100% / 0.949；
      * 1.0（等权）→ 92.3% / 96.2% / 0.950。等权反而最差，因为 hashing 向量路的排序质量只有
      * 73.1% Hit@1，等权等于让它拿到一半投票权、把 BM25 排对的位置挤下去。
+     *
+     * <p>2026-11 语料扩到 35 篇后复扫：0.0 → 96.2% / 100% / 0.981，0.2 → 92.3% / 100% / 0.962。
+     * 权重<b>没有随语料调整</b>（B5 只补 HyPE 数据），当前 0.2 在留出集上也不如纯 BM25，
+     * 是否砍掉向量路需要单独决策，见文档「已知限制」。
      */
     private static final double DEFAULT_VECTOR_WEIGHT = 0.2;
     private static final double DEFAULT_BM25_WEIGHT = 1.0;
@@ -178,8 +185,8 @@ public class RetrievalService {
      * 检索入口。返回已按相关度降序、且已过阈值的命中列表，可以是空列表。
      *
      * @param query           查询串；空白直接返回空列表（400 由 Controller 负责）
-     * @param interviewerCode 角色卡 code，非空且挂载了文档时优先按挂载范围检索
-     * @param jobCode         岗位 code，没挂载时按文档 category 过滤
+     * @param interviewerCode 角色卡 code；非空时只在该角色挂载的文档范围内检索，未挂载即空范围
+     * @param jobCode         岗位 code，<b>仅在没传角色时</b>用于按文档 category 过滤
      * @param options         检索参数，null 用默认值
      * @param mode            检索模式，null 当混合
      */
@@ -240,7 +247,8 @@ public class RetrievalService {
             Candidate candidate = passed.get(i);
             RetrievalIndex.Doc doc = docs.get(candidate.position);
             hits.add(new KnowledgeHit(doc.chunkId(), doc.docId(), doc.docCode(), doc.docTitle(),
-                    doc.heading(), doc.text(), candidate.rrf, candidate.vectorScore, candidate.bm25Score));
+                    doc.chunkIndex(), doc.heading(), doc.text(), candidate.rrf,
+                    candidate.vectorScore, candidate.bm25Score));
         }
         return hits;
     }
@@ -314,6 +322,7 @@ public class RetrievalService {
                 continue;
             }
             docs.add(new RetrievalIndex.Doc(chunk.getId(), doc.getId(), doc.getCode(), doc.getTitle(),
+                    chunk.getChunkIndex() == null ? -1 : chunk.getChunkIndex(),
                     chunk.getHeading(), chunk.getText(), chunk.getHypeQuestions()));
         }
 
@@ -351,28 +360,27 @@ public class RetrievalService {
     }
 
     /**
-     * 检索范围（先定范围再打分）：
-     * 角色挂载优先 → 岗位分类次之 → 都没有就是全部启用文档。
+     * 检索范围（先定范围再打分）：传了角色就<b>只</b>按该角色的挂载范围；
+     * 没传角色才按岗位分类；两者都没有就是全部启用文档。
      *
-     * <p>挂载非空但指向的文档全被停用时返回空集合（不再退化成「全部」），
-     * 否则「考官没配语料」会静默变成「用整库语料」，这是更难发现的错。
+     * <p>角色没有挂载就是空范围，<b>不再退回岗位或整库</b>：那样「考官没配语料」
+     * 会静默变成「用整库语料」，注入的内容既不符合角色设定、也未必符合岗位，
+     * 而且界面上完全看不出来。空范围返回空列表，注入侧自然就不注入。
      */
     private Set<Long> scopeDocIds(String interviewerCode, String jobCode) {
         if (interviewerCode != null && !interviewerCode.isBlank()) {
             List<InterviewerKnowledge> mounts = mountRepository.findByInterviewerCode(interviewerCode);
-            if (!mounts.isEmpty()) {
-                List<Long> mountedIds = new ArrayList<>(mounts.size());
-                for (InterviewerKnowledge mount : mounts) {
-                    mountedIds.add(mount.getDocId());
-                }
-                Set<Long> enabled = new HashSet<>();
-                for (KnowledgeDoc doc : docRepository.findAllById(mountedIds)) {
-                    if (Boolean.TRUE.equals(doc.getEnabled())) {
-                        enabled.add(doc.getId());
-                    }
-                }
-                return enabled;
+            List<Long> mountedIds = new ArrayList<>(mounts.size());
+            for (InterviewerKnowledge mount : mounts) {
+                mountedIds.add(mount.getDocId());
             }
+            Set<Long> enabled = new HashSet<>();
+            for (KnowledgeDoc doc : docRepository.findAllById(mountedIds)) {
+                if (Boolean.TRUE.equals(doc.getEnabled())) {
+                    enabled.add(doc.getId());
+                }
+            }
+            return enabled;
         }
         boolean byJob = jobCode != null && !jobCode.isBlank();
         Set<Long> ids = new HashSet<>();

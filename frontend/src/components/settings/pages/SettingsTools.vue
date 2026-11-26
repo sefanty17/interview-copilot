@@ -643,7 +643,7 @@ import type {
   ToolAccessMode,
   ToolRecommendMode,
   WebSearchSettings,
-} from "../../../data/mock";
+} from "../../../types/domain";
 import { notify, store, updateSettings } from "../../../store/appStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
 

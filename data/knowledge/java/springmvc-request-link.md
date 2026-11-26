@@ -1,0 +1,15 @@
+# SpringMVC 请求链路
+## 核心组件
+面试官常问：SpringMVC核心组件：DispatcherServlet、HandlerMapping、HandlerAdapter、ViewResolver分别干什么？
+答题要点：DispatcherServlet是前端控制器，统一入口，接收所有请求；HandlerMapping根据URL找到对应的Handler（Controller）；HandlerAdapter适配不同Handler，调用Controller方法；ViewResolver解析视图，跳转页面，前后端分离项目一般不用视图。
+常见误区：Controller直接被DispatcherServlet调用；DispatcherServlet不知道怎么调用Controller，必须通过HandlerAdapter适配。
+
+## 完整请求执行流程
+面试官常问：一次http请求进入SpringMVC完整流程？
+答题要点：请求到Tomcat，交给DispatcherServlet；DispatcherServlet调用HandlerMapping匹配url拿到handler；找到支持这个handler的HandlerAdapter；适配器执行Controller方法；方法返回ModelAndView；经过拦截器后置处理；视图解析、渲染；返回响应。
+常见误区：拦截器在过滤器里面执行；拦截器是SpringMVC组件，在DispatcherServlet内部；Filter是Servlet规范，在DispatcherServlet外面。
+
+## 拦截器 Interceptor
+面试官常问：拦截器三个方法preHandle、postHandle、afterCompletion执行时机？
+答题要点：preHandle：Controller执行之前，返回true放行；postHandle：Controller执行完，视图渲染之前；afterCompletion：整个请求完成、视图渲染之后，异常也会执行，适合资源清理。
+常见误区：postHandle抛异常还能执行；Controller抛出异常，postHandle不会执行，afterCompletion依旧执行。

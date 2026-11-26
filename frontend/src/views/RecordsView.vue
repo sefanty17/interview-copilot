@@ -25,14 +25,74 @@
     </MenuItem>
 
     <MenuItem v-if="records.length" size="large" title="历史面试" icon="▤">
-      <div class="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2">
-        <div
-          v-for="(r, i) in records"
-          :key="r.id"
-          class="flex h-full flex-col rounded-xl border border-white/12 bg-white/[0.05] p-4 transition-all duration-300 hover:-translate-y-[3px] hover:border-[#79d9ff]/50"
+      <div class="mb-4 flex flex-wrap items-center gap-2">
+        <div class="mr-auto flex flex-wrap gap-2">
+          <button
+            v-for="tab in kindTabs"
+            :key="tab.value"
+            class="cursor-pointer rounded-full border px-4 py-1.5 text-xs font-bold transition-colors"
+            :class="kindFilter === tab.value
+              ? 'border-[#79d9ff]/60 bg-[#79d9ff]/15 text-[#79d9ff]'
+              : 'border-white/15 bg-white/5 text-white/55 hover:bg-white/10'"
+            @click="setKind(tab.value)"
+          >
+            {{ tab.label }}
+            <span class="ml-1 font-mono text-[10px] opacity-70">{{ tab.count }}</span>
+          </button>
+        </div>
+        <button
+          v-if="!batchMode"
+          class="cursor-pointer rounded-full border border-red-500/40 bg-red-500/15 px-4 py-1.5 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/25"
+          @click="enterBatch"
         >
-          <div class="font-mono text-[10px] tracking-wide text-white/40">
-            No.{{ i + 1 }} · {{ formatDate(r.date) }}
+          批量删除
+        </button>
+        <template v-else>
+          <span class="mr-auto text-xs text-white/50">已选 {{ selected.size }} / {{ filteredRecords.length }}</span>
+          <button
+            class="cursor-pointer rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-xs font-bold text-white/70 transition-colors hover:bg-white/10"
+            @click="toggleSelectAll"
+          >
+            {{ allSelected ? "取消全选" : "全选" }}
+          </button>
+          <button
+            class="cursor-pointer rounded-full border border-red-500/40 bg-red-500/15 px-4 py-1.5 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!selected.size"
+            @click="removeSelected"
+          >
+            删除选中（{{ selected.size }}）
+          </button>
+          <button
+            class="cursor-pointer rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-bold text-white/60 transition-colors hover:bg-white/10"
+            @click="exitBatch"
+          >
+            取消
+          </button>
+        </template>
+      </div>
+      <p v-if="!filteredRecords.length" class="py-12 text-center text-sm text-white/40">
+        暂无{{ kindLabel }}记录
+      </p>
+      <div v-else class="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2">
+        <div
+          v-for="(r, i) in filteredRecords"
+          :key="r.id"
+          class="flex h-full flex-col rounded-xl border bg-white/[0.05] p-4 transition-all duration-300"
+          :class="batchMode && selected.has(r.id)
+            ? 'border-red-400/60 bg-red-500/[0.08]'
+            : 'border-white/12 hover:-translate-y-[3px] hover:border-[#79d9ff]/50'"
+        >
+          <div class="flex items-center gap-2">
+            <input
+              v-if="batchMode"
+              type="checkbox"
+              :checked="selected.has(r.id)"
+              class="size-4 shrink-0 cursor-pointer accent-red-400"
+              @change="toggle(r.id)"
+            />
+            <div class="font-mono text-[10px] tracking-wide text-white/40">
+              No.{{ i + 1 }} · {{ formatDate(r.date) }}
+            </div>
           </div>
 
           <div class="mt-1 truncate text-base font-bold text-white" :title="r.jobName">
@@ -42,13 +102,21 @@
           <div class="my-2 border-b border-dashed border-white/10"></div>
 
           <div class="flex items-baseline gap-2">
-            <span class="text-2xl font-bold text-[#79d9ff]">{{ r.score }} 分</span>
-            <span class="text-xs text-white/50">{{ r.questions.length }} 题 · {{ minutes(r.duration) }} 分钟</span>
+            <template v-if="sessionKind(r) === 'free'">
+              <span class="text-base font-bold text-white/75">自由对话</span>
+              <span class="text-xs text-white/50">不计分 · 不进成长曲线</span>
+            </template>
+            <template v-else>
+              <span class="text-2xl font-bold text-[#79d9ff]">{{ r.score }} 分</span>
+              <span class="text-xs text-white/50">{{ r.questions.length }} 题 · {{ minutes(r.duration) }} 分钟</span>
+            </template>
           </div>
 
-          <p class="mt-2 line-clamp-2 text-xs italic text-white/40">{{ excerpt(r) }}</p>
+          <p class="mt-2 line-clamp-2 text-xs italic text-white/40">
+            {{ sessionKind(r) === "free" ? "自由对话场次只保留对话记录，没有评分与逐题复盘。" : excerpt(r) }}
+          </p>
 
-          <div class="mt-auto flex flex-wrap gap-2 pt-3">
+          <div v-if="!batchMode" class="mt-auto flex flex-wrap gap-2 pt-3">
             <button
               class="cursor-pointer rounded-full border border-[#79d9ff]/40 bg-[#79d9ff]/15 px-3 py-1 text-xs font-bold text-[#79d9ff] transition-colors hover:bg-[#79d9ff]/25"
               @click="openReport(r)"
@@ -73,8 +141,102 @@
       </div>
     </MenuItem>
 
-    <MenuItem v-if="curveRecords.length >= 2" size="large" title="成长曲线" icon="↗">
-      <LineChart :labels="chartLabels" :values="chartValues" :height="240" />
+    <MenuItem v-if="trendPoints.length" size="large" title="成长曲线" icon="↗">
+      <p class="mb-3 text-xs text-white/45">只统计剧本场次的 AI 评估，自由对话不计入。</p>
+      <LineChart
+        v-if="trendPoints.length >= requiredPoints"
+        :labels="trendLabels"
+        :series="trendSeries"
+        :height="260"
+      />
+      <div v-else class="py-10 text-center">
+        <p class="text-sm text-white/50">
+          数据不足，再练 {{ requiredPoints - trendPoints.length }} 场就能看到变化。
+        </p>
+        <p class="mt-1 text-xs text-white/35">
+          当前已有 {{ trendPoints.length }} 场带评估的剧本面试（至少 {{ requiredPoints }} 场才画线）。
+        </p>
+      </div>
+    </MenuItem>
+
+    <MenuItem v-if="recommendations.length" size="large" title="提升路径" icon="→">
+      <p class="mb-3 text-xs text-white/45">
+        按最近几场的短板维度推荐知识库条目，点「开始练习」直接进入同岗位面试。
+      </p>
+      <div
+        v-for="rec in recommendations"
+        :key="rec.dimCode"
+        class="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-4 last:mb-0"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span class="text-sm font-bold text-white">{{ rec.label }}</span>
+            <span class="ml-2 text-xs text-[#ffd166]">最近平均 {{ rec.averageScore }} 分 · 短板</span>
+          </div>
+          <button
+            class="shrink-0 cursor-pointer rounded-full border border-[#79d9ff]/40 bg-[#79d9ff]/15 px-4 py-1.5 text-xs font-bold text-[#79d9ff] transition-colors hover:bg-[#79d9ff]/25"
+            @click="practice(rec)"
+          >
+            开始练习
+          </button>
+        </div>
+        <p class="mt-1 text-[11px] text-white/35">推荐依据：{{ rec.query }}</p>
+        <ul class="mt-3 space-y-2">
+          <li
+            v-for="hit in rec.hits"
+            :key="hit.chunkId"
+            class="rounded-lg border border-white/10 bg-[#0b1522]/60 p-2.5"
+          >
+            <div class="text-xs font-bold text-white/80">
+              <span v-if="hit.chunkIndex !== undefined" class="text-white/45"
+                >第 {{ hit.chunkIndex + 1 }} 段 · </span
+              >{{ hit.docTitle }}
+              <span v-if="hit.heading" class="text-white/45"> · {{ hit.heading }}</span>
+            </div>
+            <p class="mt-1 line-clamp-2 text-[11px] leading-relaxed text-white/55">{{ hit.text }}</p>
+          </li>
+        </ul>
+        <p v-if="!rec.hits.length" class="mt-3 text-xs text-white/40">
+          {{ rec.query.length < 12
+            ? "这段评语比较笼统，暂时没匹配到具体资料，直接练一场更有效。"
+            : "知识库里暂无对应条目，可先在「设置 → 知识库」导入语料。" }}
+        </p>
+      </div>
+    </MenuItem>
+
+    <MenuItem v-if="practicePlan.length" size="large" title="3 天练习计划" icon="◷">
+      <p class="mb-3 text-xs text-white/45">
+        按最近几场平均分最低的两个维度排的 3 天计划：前两天各攻一个短板，第三天合起来面一场。
+      </p>
+      <div class="grid gap-4 md:grid-cols-3">
+        <div
+          v-for="day in practicePlan"
+          :key="day.day"
+          class="flex h-full flex-col rounded-xl border border-white/10 bg-white/[0.04] p-4"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-mono text-[10px] font-bold tracking-wider text-[#79d9ff]">DAY {{ day.day }}</span>
+            <span class="shrink-0 rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/60">
+              {{ day.label }}
+            </span>
+          </div>
+          <div class="mt-2 text-sm font-bold leading-relaxed text-white">{{ day.title }}</div>
+          <ul class="mt-2 space-y-1.5 text-[11px] leading-relaxed text-white/55">
+            <li v-for="(task, i) in day.tasks" :key="i" class="flex gap-1.5">
+              <span class="shrink-0 text-[#79d9ff]/70">{{ i + 1 }}.</span>
+              <span>{{ task }}</span>
+            </li>
+          </ul>
+          <div class="mt-auto pt-3">
+            <button
+              class="cursor-pointer rounded-full border border-[#79d9ff]/40 bg-[#79d9ff]/15 px-4 py-1.5 text-xs font-bold text-[#79d9ff] transition-colors hover:bg-[#79d9ff]/25"
+              @click="startPracticeDay(day)"
+            >
+              {{ day.entryLabel }}
+            </button>
+          </div>
+        </div>
+      </div>
     </MenuItem>
   </PageShell>
 </template>
@@ -85,11 +247,15 @@ import { useRouter } from "vue-router";
 import PageShell from "../components/ui/PageShell.vue";
 import MenuItem from "../components/settings/MenuItem.vue";
 import LineChart from "../components/ui/LineChart.vue";
-import { jobs, type InterviewRecord } from "../data/mock";
-import { findInterviewer } from "../data/interviewers";
+import { jobs } from "../data/jobs";
+import type { InterviewRecord } from "../types/domain";
+import { findInterviewer } from "../store/interviewers";
 import { confirmDialog } from "../store/dialogStore";
 import { notify, persist, startSession, store } from "../store/appStore";
-import { fetchSessions, isBackendUp, type SessionSummary } from "../api/chat";
+import { deleteSession, fetchSessions, isBackendUp, type SessionSummary } from "../api/chat";
+import { fetchTrend, type TrendPoint, type TrendPracticeDay, type TrendRecommendation } from "../api/reports";
+import { seedScripts } from "../data/scripts";
+import type { PersonaId } from "../types/domain";
 
 const router = useRouter();
 
@@ -103,10 +269,195 @@ const remoteSummaries = new Map<string, SessionSummary>();
 
 const records = computed(() => [...store.records, ...remoteRecords.value]);
 
-/** 只有本地条目带 dimensions，成长曲线跳过后端条目 */
-const curveRecords = computed(() => records.value.filter((r) => r.dimensions.length > 0).reverse());
-const chartLabels = computed(() => curveRecords.value.map((r) => r.date.slice(5, 10)));
-const chartValues = computed(() => curveRecords.value.map((r) => r.score));
+// ── 分类：剧本面试 / 自由面试 ──
+/** 后端场次看 scriptCode，本地存档（没建后端场次时写的那份）只有剧本形态 */
+type SessionKind = "script" | "free";
+type KindFilter = "all" | SessionKind;
+
+const kindFilter = ref<KindFilter>("all");
+
+function countOf(kind: SessionKind): number {
+  return records.value.filter((r) => sessionKind(r) === kind).length;
+}
+
+const kindTabs = computed(() => [
+  { value: "all" as KindFilter, label: "全部", count: records.value.length },
+  { value: "script" as KindFilter, label: "剧本面试", count: countOf("script") },
+  { value: "free" as KindFilter, label: "自由面试", count: countOf("free") },
+]);
+
+const kindLabel = computed(() =>
+  kindFilter.value === "free" ? "自由面试" : kindFilter.value === "script" ? "剧本面试" : "",
+);
+
+const filteredRecords = computed(() =>
+  kindFilter.value === "all"
+    ? records.value
+    : records.value.filter((r) => sessionKind(r) === kindFilter.value),
+);
+
+/** 换分类时清空勾选：批量操作只对当前可见列表生效 */
+function setKind(kind: KindFilter) {
+  kindFilter.value = kind;
+  selected.value = new Set();
+}
+
+// ── 批量删除：进入选择态后每张卡片前出现勾选框，按 id 记录选中项 ──
+const batchMode = ref(false);
+const selected = ref<Set<string>>(new Set());
+const allSelected = computed(
+  () => filteredRecords.value.length > 0 && filteredRecords.value.every((r) => selected.value.has(r.id)),
+);
+
+function enterBatch() {
+  batchMode.value = true;
+  selected.value = new Set();
+}
+
+function exitBatch() {
+  batchMode.value = false;
+  selected.value = new Set();
+}
+
+function toggle(id: string) {
+  const next = new Set(selected.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  selected.value = next;
+}
+
+function toggleSelectAll() {
+  selected.value = allSelected.value ? new Set() : new Set(filteredRecords.value.map((r) => r.id));
+}
+
+/** 本地记录删存档；后端场次调 DELETE 真删（连同台词与评估一起清） */
+async function removeSelected() {
+  const ids = [...selected.value];
+  if (!ids.length) return;
+  const ok = await confirmDialog("删除选中的记录？", `共 ${ids.length} 条，删除后不可恢复。`);
+  if (!ok) return;
+
+  const remoteIds = ids.filter((id) => id.startsWith("s-"));
+  const localIds = ids.filter((id) => !id.startsWith("s-"));
+  for (const id of localIds) {
+    const idx = store.records.findIndex((r) => r.id === id);
+    if (idx >= 0) store.records.splice(idx, 1);
+  }
+  if (localIds.length) persist();
+
+  let failed = 0;
+  if (remoteIds.length) {
+    const results = await Promise.allSettled(
+      remoteIds.map((id) => deleteSession(Number(id.replace(/^s-/, "")))),
+    );
+    const deletedIds = remoteIds.filter((_, i) => results[i].status === "fulfilled");
+    failed = remoteIds.length - deletedIds.length;
+    remoteRecords.value = remoteRecords.value.filter((r) => !deletedIds.includes(r.id));
+    deletedIds.forEach((id) => remoteSummaries.delete(id));
+  }
+
+  exitBatch();
+  notify(failed ? `已删除 ${ids.length - failed} 条，${failed} 条后端删除失败` : `已删除 ${ids.length} 条记录`);
+}
+
+/** 成长曲线：只来自后端评估（本地记录的分是 mock，不参与趋势） */
+const trendPoints = ref<TrendPoint[]>([]);
+const requiredPoints = ref(3);
+const recommendations = ref<TrendRecommendation[]>([]);
+const practicePlan = ref<TrendPracticeDay[]>([]);
+
+const trendLabels = computed(() => trendPoints.value.map((p) => p.date.slice(5, 10)));
+
+/** 维度固定顺序 + 各自配色；缺该维度的场次不参与这条线 */
+const DIM_ORDER = ["technical", "depth", "logic", "fit"] as const;
+const DIM_COLORS = ["#ffd166", "#7ee787", "#a78bfa", "#ff8fa3"];
+
+const trendSeries = computed(() => {
+  const points = trendPoints.value;
+  if (!points.length) return [];
+  const total = {
+    name: "总分",
+    values: points.map((p) => p.overallScore),
+    color: "#79d9ff",
+  };
+  const dims = DIM_ORDER.map((code, i) => ({
+    name: points[0].dimensions.find((d) => d.code === code)?.label ?? code,
+    values: points.map((p) => p.dimensions.find((d) => d.code === code)?.score ?? 0),
+    color: DIM_COLORS[i],
+    present: points.some((p) => p.dimensions.some((d) => d.code === code)),
+  }))
+    .filter((s) => s.present)
+    .map((s) => ({ name: s.name, values: s.values, color: s.color }));
+  return [total, ...dims];
+});
+
+/**
+ * 短板推荐点进去＝同岗位开一场<b>剧本</b>面试。
+ *
+ * <p>为什么必须是剧本模式而不是自由对话：成长曲线与提升路径只统计剧本场次
+ * （自由对话 `script_id` 为空、也不产生评估）。如果开自由面试，练完这一场
+ * 不会进曲线、也不会回流到「短板」，闭环就断了——「练习—评估—提升」里
+ * 评估这一步是空的，下次进来看到的还是同一份结论。
+ */
+function practice(rec: TrendRecommendation) {
+  startScriptPractice({
+    code: rec.dimCode,
+    label: rec.label,
+    brief: rec.query,
+    notice: `已开始「${rec.label}」专项练习（剧本面试，本场会计入成长曲线）`,
+  });
+}
+
+/**
+ * 练习计划的 DAY 1 / DAY 2：同样走剧本面试，并带上当天的专项与要点。
+ *
+ * <p>DAY 3 是综合复盘（dimCode 为空），仍按后端给的 entryRoute 跳报告页。
+ * 专项信息写进 bondFocus，由房间页带进 createSession，后端会拼成「只深挖这一项」的
+ * system 约束，面试官就不会按完整流程泛泛提问。
+ */
+function startPracticeDay(day: TrendPracticeDay) {
+  if (!day.dimCode) {
+    router.push(day.entryRoute);
+    return;
+  }
+  startScriptPractice({
+    code: day.dimCode,
+    label: day.label,
+    brief: day.tasks.join("；").slice(0, 260),
+    notice: `已开始 DAY ${day.day} 专项练习：${day.label}（剧本面试，本场会计入成长曲线）`,
+  });
+}
+
+/**
+ * 开一场带专项的剧本面试：岗位取最近一场，剧本按岗位挑第一本。
+ *
+ * <p>没有匹配剧本时退回自由对话并说明原因，而不是静默开一场不进曲线的练习。
+ */
+function startScriptPractice(opts: { code: string; label: string; brief: string; notice: string }) {
+  const jobCode = trendPoints.value[trendPoints.value.length - 1]?.jobCode;
+  const job = jobs.find((j) => j.id === jobCode) ?? jobs[0];
+  // 首页与设置页的剧本都从 seedScripts 取（本项目没有远程剧本列表），这里同一口径
+  const script = seedScripts.find((s) => s.job_code === job.id);
+  if (!script) {
+    localStorage.removeItem("bondFocus");
+    startSession(job.id, store.settings.personaId, "free");
+    notify(`该岗位暂无剧本，已用自由面试开始「${opts.label}」练习（本场不计入成长曲线）`);
+    router.push("/interview");
+    return;
+  }
+  // 与首页「剧本面试」同一条绑定路径：房间页靠 bondScript 把 script_id 落库，
+  // bondFocus 让这一场只练专项（普通剧本入口会在起始处清掉这个键）
+  const interviewer = (script.interviewer_code as PersonaId | undefined) ?? store.settings.personaId;
+  localStorage.setItem("bondScript", script.code);
+  localStorage.setItem("bondCharacter", interviewer);
+  localStorage.setItem(
+    "bondFocus",
+    JSON.stringify({ code: opts.code, label: opts.label, brief: opts.brief }),
+  );
+  startSession(script.job_code ?? job.id, interviewer, "script");
+  notify(opts.notice);
+  router.push("/interview");
+}
 
 const elapsed = ref(0);
 let timer: number | undefined;
@@ -129,6 +480,7 @@ onMounted(() => {
   tick();
   timer = window.setInterval(tick, 1000);
   void loadRemoteRecords();
+  void loadTrend();
 });
 
 /** 后端在线则把已完成场次并进列表；离线完全保持纯本地列表，不报错 */
@@ -136,11 +488,37 @@ async function loadRemoteRecords() {
   if (!(await isBackendUp())) return;
   try {
     const sessions = await fetchSessions("finished");
-    remoteRecords.value = sessions.map(toRecord);
+    // 先落 summary 再赋列表：卡片渲染要读 scriptCode 判断自由对话
     remoteSummaries.clear();
     sessions.forEach((summary) => remoteSummaries.set("s-" + summary.id, summary));
+    remoteRecords.value = sessions.map(toRecord);
+    pruneDuplicateLocalRecords(new Set(sessions.map((s) => s.id)));
   } catch (error) {
     console.warn("[records] 拉取后端场次失败，只用本地记录", error);
+  }
+}
+
+/**
+ * 清掉旧版本留下的重复本地存档：本地记录只要带着后端场次 id，就说明这一场后端已有记录，
+ * 本地那份是当初 finish() 额外写的 mock 分副本（典型表现是每场面试多出一条 86 分记录）。
+ */
+function pruneDuplicateLocalRecords(remoteIds: Set<number>) {
+  const kept = store.records.filter((r) => !(r.sessionId && remoteIds.has(r.sessionId)));
+  if (kept.length === store.records.length) return;
+  store.records.splice(0, store.records.length, ...kept);
+  persist();
+}
+
+/** 成长曲线/提升路径：后端没起来就整块不显示，避免拿本地 mock 分数糊一条假的趋势 */
+async function loadTrend() {
+  try {
+    const view = await fetchTrend();
+    trendPoints.value = view.points;
+    requiredPoints.value = view.requiredPoints;
+    recommendations.value = view.recommendations;
+    practicePlan.value = view.practicePlan ?? [];
+  } catch (error) {
+    console.warn("[records] 拉取成长曲线失败，暂不展示趋势", error);
   }
 }
 
@@ -148,8 +526,9 @@ async function loadRemoteRecords() {
 function toRecord(summary: SessionSummary): InterviewRecord {
   return {
     id: "s-" + summary.id,
-    jobName: summary.title,
-    personaName: summary.interviewerCode ?? "-",
+    // 岗位/面试官按场次字段映射成中文名，别直接拿后端 title（那是「姓名 · 岗位 code」拼的）
+    jobName: jobs.find((j) => j.id === summary.jobCode)?.name ?? summary.title,
+    personaName: findInterviewer(summary.interviewerCode)?.name ?? summary.interviewerCode ?? "-",
     date: summary.endedAt ?? summary.startedAt ?? "-",
     duration: "-",
     score: summary.score ?? 0,
@@ -161,6 +540,13 @@ function toRecord(summary: SessionSummary): InterviewRecord {
 
 function isRemote(r: InterviewRecord): boolean {
   return r.id.startsWith("s-");
+}
+
+/** 后端场次 summary.scriptCode 为空即自由对话；本地存档没有这个字段，按剧本面试算 */
+function sessionKind(r: InterviewRecord): SessionKind {
+  if (!isRemote(r)) return "script";
+  const summary = remoteSummaries.get(r.id);
+  return summary && !summary.scriptCode ? "free" : "script";
 }
 
 onBeforeUnmount(() => {
@@ -185,28 +571,30 @@ function excerpt(r: InterviewRecord): string {
   return last ? `“${last.question}”` : "暂无对话摘录";
 }
 
-/** 后端条目没有逐题数据，ReportView 渲染不了，改成弹窗显示摘要 */
+/** 后端条目没有逐题数据，报告页按 ?sid= 拉详情与评估，逐题区块显示「本场没有逐题记录」 */
 async function openReport(r: InterviewRecord) {
   if (!isRemote(r)) {
     // 有后端场次 id 就带上，报告页靠它去拉 AI 评估；老存档没有 sid 会退回本地数据
     router.push(r.sessionId ? `/report/${r.id}?sid=${r.sessionId}` : "/report/" + r.id);
     return;
   }
-  const summary = remoteSummaries.get(r.id);
-  const title = summary?.title ?? r.jobName;
-  const status = summary?.status ?? "-";
-  const score = summary?.score ?? r.score;
-  await confirmDialog(title, `状态：${status}　总分：${score}`);
+  // 后端场次：本地没有对应的 store.records，报告页会用 ?sid= 拉场次详情 + 评估自行渲染
+  router.push(`/report/${r.id}?sid=${String(r.id).replace(/^s-/, "")}`);
 }
 
 async function remove(r: InterviewRecord) {
   const ok = await confirmDialog("删除这条记录？", "删除后不可恢复。");
   if (!ok) return;
   if (isRemote(r)) {
-    // 后端条目只从展示列表移除，不调后端
-    remoteRecords.value = remoteRecords.value.filter((x) => x.id !== r.id);
-    remoteSummaries.delete(r.id);
-    notify("记录已从列表移除");
+    try {
+      await deleteSession(Number(r.id.replace(/^s-/, "")));
+      remoteRecords.value = remoteRecords.value.filter((x) => x.id !== r.id);
+      remoteSummaries.delete(r.id);
+      notify("记录已删除");
+    } catch (error) {
+      console.warn("[records] 后端删除失败", error);
+      notify("后端删除失败，请稍后重试");
+    }
     return;
   }
   const idx = store.records.findIndex((x) => x.id === r.id);

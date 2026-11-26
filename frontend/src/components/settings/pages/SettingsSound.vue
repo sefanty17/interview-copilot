@@ -336,7 +336,7 @@ import {
 import { Button } from "../../base";
 import { MenuItem, MenuPage } from "../../ui";
 import { notify, persist, store, updateSettings } from "../../../store/appStore";
-import type { AmbientTrack } from "../../../data/mock";
+import type { AmbientTrack } from "../../../types/domain";
 
 // ========== 音量（原版 audio.characterVolume 等） ==========
 const characterVolume = computed({

@@ -50,7 +50,7 @@ class EvaluationPrompterTest {
                 message(2, InterviewMessage.ROLE_ASSISTANT, "说说 JVM 内存模型"),
                 message(3, InterviewMessage.ROLE_USER, "堆和栈，方法区在元空间"));
 
-        List<LlmMessage> built = EvaluationPrompter.build("java", messages);
+        List<LlmMessage> built = EvaluationPrompter.build("java", null, messages);
 
         assertEquals(2, built.size());
         String user = built.get(1).content();
@@ -71,11 +71,27 @@ class EvaluationPrompterTest {
         }
         messages.add(message(201, InterviewMessage.ROLE_USER, "MARK-最后一条回答"));
 
-        String user = EvaluationPrompter.build("java", messages).get(1).content();
+        String user = EvaluationPrompter.build("java", null, messages).get(1).content();
 
         assertTrue(user.length() <= 8000, "user 文本超预算：" + user.length());
         assertTrue(user.contains("MARK-最后一条回答"), "结尾表现最关键，不能先被截掉");
         assertFalse(user.contains("第 0 轮"), "最早的对话应当被丢掉");
+    }
+
+    /** 5. 简历摘要进 user；简历为空/空白时，「简历摘要」小节整个不出现。 */
+    @Test
+    void 简历摘要进user且空白时不出现() {
+        List<InterviewMessage> messages = List.of(
+                message(1, InterviewMessage.ROLE_ASSISTANT, "介绍一下你的项目"),
+                message(2, InterviewMessage.ROLE_USER, "做过一个秒杀系统"));
+
+        String withResume = EvaluationPrompter.build("java", "  三年 Java 后端，做过秒杀与支付  ", messages)
+                .get(1).content();
+        assertTrue(withResume.contains("三年 Java 后端，做过秒杀与支付"), withResume);
+        assertTrue(withResume.contains("岗位匹配度"), "要说明简历的用途：" + withResume);
+
+        String without = EvaluationPrompter.build("java", "   ", messages).get(1).content();
+        assertFalse(without.contains("简历摘要"), "没有简历时不该留空小节：" + without);
     }
 
     private static List<LlmMessage> build() {
@@ -83,7 +99,7 @@ class EvaluationPrompterTest {
                 message(1, InterviewMessage.ROLE_ASSISTANT, "说说 JVM 内存模型"),
                 message(2, InterviewMessage.ROLE_USER, "堆和栈"),
                 message(3, InterviewMessage.ROLE_USER, "还有元空间"));
-        return EvaluationPrompter.build("java", messages);
+        return EvaluationPrompter.build("java", null, messages);
     }
 
     private static InterviewMessage message(int seq, String role, String content) {

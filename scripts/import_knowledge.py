@@ -16,6 +16,7 @@
     python scripts/import_knowledge.py                     # 全量导入
     python scripts/import_knowledge.py --force             # 忽略指纹强制重传
     python scripts/import_knowledge.py --role strict,expert  # 导入后挂到角色卡
+    python scripts/import_knowledge.py --seed-bindings     # 只写演示用的角色卡绑定（4 个角色各挂几本）
     python scripts/import_knowledge.py --selftest          # 只跑切分逻辑断言，不需要后端
 """
 
@@ -40,6 +41,37 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIR = ROOT / "data" / "knowledge"
 INDEX_FILE = DEFAULT_DIR / ".knowledge-index.json"
 DEFAULT_API = "http://127.0.0.1:8080"
+
+# 演示用的最小绑定：角色 code → 文档 code。
+# 检索侧「传了角色就只按挂载，且不再按岗位过滤」——没绑定就是空范围，所以四个角色
+# 都必须显式挂上语料，否则换到该角色的面试永远不会注入知识。
+# java / frontend 两类都挂：同一角色可能被两个岗位复用，范围不按岗位裁剪。
+# 覆盖式写入（不是合并）：种子的意义是可复现，
+# 合并会把历史上误勾的文档留下，演示时检索范围就不受控了。
+SEED_BINDINGS = {
+    # 严格技术面：JVM + Spring 两个高频考点
+    "strict": ["java-jvm-memory", "java-spring-core"],
+    # 压力面：只留并发，追问密度高
+    "pressure": ["java-concurrency"],
+    # 温和 HR 面：基础与项目常识，两个岗位各两篇，换岗位也不会空
+    "friendly": [
+        "java-jvm-memory",
+        "java-spring-core",
+        "java-mysql-index",
+        "frontend-js-core",
+        "frontend-css-layout",
+    ],
+    # 技术专家面：深水区（并发 / MySQL / Redis / Spring）+ 前端运行时，覆盖两个岗位
+    "expert": [
+        "java-concurrency",
+        "java-jvm-memory",
+        "java-mysql-index",
+        "java-redis-cache",
+        "java-spring-core",
+        "frontend-js-core",
+        "frontend-browser-network",
+    ],
+}
 
 
 # ---------------------------------------------------------------- 切分
@@ -214,6 +246,17 @@ def merge_roles(api, role_codes, doc_codes):
         print(f"  角色 {role}：{len(existing)} → {len(merged)} 篇")
 
 
+def seed_bindings(api):
+    """覆盖式写入演示绑定。文档必须先导入，否则接口会 400「未知文档 code」。"""
+    print("写角色卡知识绑定：")
+    for role, codes in SEED_BINDINGS.items():
+        status, body = http_json("PUT", f"{api}/api/interviewers/{role}/knowledge", {"docCodes": codes})
+        if status not in (200, 204):
+            detail = body.get("detail") if isinstance(body, dict) else body
+            raise SystemExit(f"绑定失败 {role}：HTTP {status} {detail}")
+        print(f"  角色 {role} → {len(codes)} 篇：{', '.join(codes)}")
+
+
 def run_selftest():
     """切分逻辑自测：不需要后端。断言的是「行为」不是「不报错」。"""
     md = """# 测试文档
@@ -258,6 +301,8 @@ def main():
     ap.add_argument("--dir", default=str(DEFAULT_DIR))
     ap.add_argument("--api", default=os.environ.get("KNOWLEDGE_API", DEFAULT_API))
     ap.add_argument("--role", default="", help="导入后挂到这些角色卡（逗号分隔）")
+    ap.add_argument("--seed-bindings", action="store_true",
+                    help="只写演示用的角色卡绑定（strict 2 本 / pressure 1 本），不导入文档")
     ap.add_argument("--force", action="store_true", help="忽略指纹，强制重传")
     ap.add_argument("--dry-run", action="store_true", help="只打印切分结果，不写库")
     ap.add_argument("--selftest", action="store_true", help="只跑切分自测")
@@ -265,6 +310,10 @@ def main():
 
     if args.selftest:
         run_selftest()
+        return
+
+    if args.seed_bindings:
+        seed_bindings(args.api)
         return
 
     base = Path(args.dir)

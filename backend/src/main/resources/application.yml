@@ -11,6 +11,9 @@ app:
   # 相对当前工作目录解析——后端 jar 与单测都在 backend/ 下启动，所以落到项目根的 ../game_data/characters；
   # CharacterCardService 里另有一条「上一级目录」兜底，两种工作目录都能命中。
   characters-dir: game_data/characters
+  # 世界书目录（issue #1 世界书半）：每个 .yml/.yaml 一本书，文件名即 code。
+  # 启动时扫描入库 worldbook_book / worldbook_entry；解析失败的跳过，不影响启动。
+  worldbooks-dir: game_data/worldbooks
   llm:
     base-url: https://api.deepseek.com
     # 密钥不入库：从环境变量读，或写进 application-local.yml（已在 .gitignore 里）。
@@ -37,6 +40,12 @@ app:
       mock-enabled: true
 
 spring:
+  # 把 ResponseStatusException 的 reason 作为 RFC7807 的 detail 返回：
+  # 前端 readError 读 detail，才能显示「jobCode 不能为空（例：java）」这类具体中文，
+  # 否则只能拿到 "Bad Request"，用户不知道为什么失败。
+  mvc:
+    problemdetails:
+      enabled: true
   datasource:
     url: jdbc:h2:file:./data/interview;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
     driver-class-name: org.h2.Driver
@@ -47,8 +56,9 @@ spring:
       mode: always
       schema-locations: classpath:schema-h2.sql
       # data-h2.sql: 角色卡 + 用户身份；scripts-h2.sql: 剧本 + 章节（scripts-h2.sql 是种子数据的另一半，
-      # 健康检查里的 interview_script / interview_chapter 计数来自它）
-      data-locations: classpath:data-h2.sql,classpath:scripts-h2.sql
+      # 健康检查里的 interview_script / interview_chapter 计数来自它）；
+      # questions-h2.sql: 自由面试题库（issue #11，按岗位随机抽题）
+      data-locations: classpath:data-h2.sql,classpath:scripts-h2.sql,classpath:questions-h2.sql
       continue-on-error: false
       encoding: UTF-8
   jpa:

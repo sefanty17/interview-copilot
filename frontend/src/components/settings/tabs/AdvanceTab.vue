@@ -91,7 +91,7 @@ import LcSlider from "../../ui/LcSlider.vue";
 import LcSelect from "../../ui/LcSelect.vue";
 import { confirmDialog } from "../../../store/dialogStore";
 import { notify, resetSettings, store, updateSettings } from "../../../store/appStore";
-import type { SiteSettings } from "../../../data/mock";
+import type { SiteSettings } from "../../../types/domain";
 
 const fileRef = ref<HTMLInputElement | null>(null);
 

@@ -47,6 +47,8 @@ public class AiDialogueEvent implements ScriptEvent {
         }
 
         List<LlmMessage> messages = withSystem(ctx, memoryBuilder.build(history));
+        // 剧本链路没有玩家原话（prompt 是旁白），只注入 always 条目（issue #1）
+        ctx.injectWorldbook(messages, null);
         // 生成侧复用 EngineContext 的落库/推流出口
         DialogueWriter.writeTurn(ctx, messages, userSeq);
         return null;

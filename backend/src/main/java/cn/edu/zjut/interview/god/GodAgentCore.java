@@ -13,8 +13,8 @@ import java.util.List;
 /**
  * 上帝 Agent 核心：配置持有 + 任务运行 + 两个共享判定（对齐 {@code god_agent/core.rs}）。
  *
- * <p>这里是各能力（选人 / 工具推荐 / 好感度）共用的基础设施。具体能力各自在
- * {@link SpeakerSelector} / {@link ToolHinter} / {@link AffectionEvaluator} 里。
+ * <p>这里是各能力（选人 / 工具推荐 / 印象评估）共用的基础设施。具体能力各自在
+ * {@link SpeakerSelector} / {@link ToolHinter} / {@link ImpressionEvaluator} 里。
  *
  * <p>两个判定必须原样照搬，改任何一个都会让多人对话退化或失控：
  * <pre>

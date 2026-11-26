@@ -136,6 +136,24 @@ class EvaluationServiceTest {
                 "评估失败不该动场次总分");
     }
 
+    /** 4. 模型调用失败：降级为规则估分而不是 502，结果与落库都带 rule-based 标记。 */
+    @Test
+    void 模型失败时降级为规则估分() {
+        when(llmClient.complete(anyList())).thenThrow(new LlmClient.LlmException("上游超时", null, true));
+        Long sessionId = newSessionWithDialogue(2);
+
+        var result = evaluationService.evaluate(sessionId);
+
+        assertTrue(result.ruleBased(), "降级结果必须带标记，不能被当成模型评的");
+        assertEquals(RuleBasedEvaluator.MODEL, result.model());
+        assertEquals(4, result.dimensions().size());
+        assertTrue(result.overallScore() >= 0 && result.overallScore() <= 100, "分数要在 0~100：" + result.overallScore());
+        assertTrue(result.questions().isEmpty(), "规则估分没有逐题复盘");
+        assertEquals(1, evaluationRepository.findBySessionId(sessionId).size());
+        assertEquals(RuleBasedEvaluator.MODEL, evaluationRepository.findBySessionId(sessionId).get(0).getModel());
+        assertTrue(evaluationService.load(sessionId).ruleBased(), "从库里读回来也要保留标记");
+    }
+
     /** 建场次 + 写 n 条求职者回答（首尾各配一句面试官，system 行也写一条验证被排除）。 */
     private Long newSessionWithDialogue(int userCount) {
         Long sessionId = chatService.createSession(new CreateSessionRequest("strict", "java", null)).sessionId();

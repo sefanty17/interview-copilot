@@ -12,6 +12,7 @@ import cn.edu.zjut.interview.engine.SseEventSink;
 import cn.edu.zjut.interview.repository.InterviewChapterRepository;
 import cn.edu.zjut.interview.repository.InterviewScriptRepository;
 import cn.edu.zjut.interview.repository.InterviewSessionRepository;
+import cn.edu.zjut.interview.service.ImpressionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -56,17 +57,20 @@ public class ScriptPlayController {
     private final InterviewScriptRepository scriptRepository;
     private final InterviewSessionRepository sessionRepository;
     private final InterviewChapterRepository chapterRepository;
+    private final ImpressionService impressions;
 
     public ScriptPlayController(InterviewEngine engine,
                                 EngineExecutor engineExecutor,
                                 InterviewScriptRepository scriptRepository,
                                 InterviewSessionRepository sessionRepository,
-                                InterviewChapterRepository chapterRepository) {
+                                InterviewChapterRepository chapterRepository,
+                                ImpressionService impressions) {
         this.engine = engine;
         this.engineExecutor = engineExecutor;
         this.scriptRepository = scriptRepository;
         this.sessionRepository = sessionRepository;
         this.chapterRepository = chapterRepository;
+        this.impressions = impressions;
     }
 
     /**
@@ -133,7 +137,10 @@ public class ScriptPlayController {
     public SseEmitter input(@PathVariable Long id, @RequestBody(required = false) SendMessageRequest request) {
         engine.ensureExists(id);
         String text = request == null || request.text() == null ? "" : request.text();
-        return stream(id, sink -> engine.submitAndRun(id, text, sink));
+        return stream(id, sink -> {
+            engine.submitAndRun(id, text, sink);
+            evaluateImpression(id, sink);
+        });
     }
 
     /**
@@ -144,7 +151,23 @@ public class ScriptPlayController {
     public SseEmitter choice(@PathVariable Long id, @RequestBody(required = false) ScriptChoiceRequest request) {
         engine.ensureExists(id);
         String choice = request == null || request.choice() == null ? "" : request.choice();
-        return stream(id, sink -> engine.submitAndRun(id, choice, sink, true));
+        return stream(id, sink -> {
+            engine.submitAndRun(id, choice, sink, true);
+            evaluateImpression(id, sink);
+        });
+    }
+
+    /**
+     * 剧本链路也每 3 条候选人回答评估一次印象。
+     *
+     * <p>评估失败只记日志：台词已经发出去了，不能因为旁路评估把整轮打成错误。
+     */
+    private void evaluateImpression(Long id, SseEventSink sink) {
+        try {
+            impressions.evaluateIfDue(id).ifPresent(sink::impression);
+        } catch (Exception e) {
+            log.warn("[ScriptPlayController] 会话 {} 印象评估异常，忽略：{}", id, e.getMessage());
+        }
     }
 
     /** 引擎的一轮推进丢到工作线程，SSE 边跑边发；异常统一转成 {@code ai:error}。 */

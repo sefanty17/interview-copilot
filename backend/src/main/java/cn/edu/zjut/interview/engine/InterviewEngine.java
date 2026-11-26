@@ -29,7 +29,9 @@ import cn.edu.zjut.interview.engine.events.SetVariableEvent;
 import cn.edu.zjut.interview.engine.events.SoundEvent;
 import cn.edu.zjut.interview.llm.LlmClient;
 import cn.edu.zjut.interview.llm.LlmMessage;
+import cn.edu.zjut.interview.media.MediaStateStore;
 import cn.edu.zjut.interview.prompt.MemoryBuilder;
+import cn.edu.zjut.interview.worldbook.WorldbookInjector;
 import cn.edu.zjut.interview.repository.InterviewChapterRepository;
 import cn.edu.zjut.interview.repository.InterviewMessageRepository;
 import cn.edu.zjut.interview.repository.InterviewScriptRepository;
@@ -92,6 +94,8 @@ public class InterviewEngine {
     private final LlmClient llmClient;
     private final ConfigService configService;
     private final ObjectMapper objectMapper;
+    /** 世界书注入器（issue #1）：剧本链路在 ai_dialogue / free_dialogue 生成前按岗位注入。 */
+    private final WorldbookInjector worldbookInjector;
 
     /** 与 ChatService 共用同一套记忆构建；无状态，直接 new。 */
     private final MemoryBuilder memoryBuilder = new MemoryBuilder();
@@ -104,7 +108,8 @@ public class InterviewEngine {
                            UserProfileRepository userProfileRepository,
                            LlmClient llmClient,
                            ConfigService configService,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           WorldbookInjector worldbookInjector) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
         this.chapterRepository = chapterRepository;
@@ -114,6 +119,7 @@ public class InterviewEngine {
         this.llmClient = llmClient;
         this.configService = configService;
         this.objectMapper = objectMapper;
+        this.worldbookInjector = worldbookInjector;
     }
 
     /** 生成侧可调项：每次推进读一次后端设置，改完设置下一轮就生效。 */
@@ -209,6 +215,7 @@ public class InterviewEngine {
                         chapterRepository, interviewerRepository, llmClient, objectMapper,
                         playerName, vars, code, presentRoles);
                 ctx.tuning(tuning);
+                ctx.worldbookInjector(worldbookInjector);
                 String result;
                 try {
                     result = createEvent(type).execute(ctx);
@@ -351,6 +358,7 @@ public class InterviewEngine {
             EngineContext ctx = new EngineContext(session, null, sink, messageRepository, chapterRepository,
                     interviewerRepository, llmClient, objectMapper, playerName(session), vars,
                     session.getCurrentChapter());
+            ctx.worldbookInjector(worldbookInjector);
             ChoiceEvent.handleActions(ctx, matched.get("actions"));
         }
 
@@ -394,8 +402,11 @@ public class InterviewEngine {
                 interviewerRepository, llmClient, objectMapper, playerName, vars,
                 session.getCurrentChapter());
         ctx.tuning(chatTuning());
+        ctx.worldbookInjector(worldbookInjector);
         List<InterviewMessage> history = messageRepository.findBySessionIdOrderBySeqAsc(session.getId());
         List<LlmMessage> messages = memoryBuilder.build(history);
+        // 剧本内自由对话：玩家原话可以触发 keyword 条目
+        ctx.injectWorldbook(messages, text);
         DialogueWriter.writeTurn(ctx, messages, lastUserSeq(history));
 
         if (!lastRound) {
@@ -423,7 +434,8 @@ public class InterviewEngine {
         load(sessionId);
     }
 
-    public SessionDetailView detail(Long sessionId) {        InterviewSession session = load(sessionId);
+    public SessionDetailView detail(Long sessionId) {
+        InterviewSession session = load(sessionId);
         InterviewScript script = script(session);
         var interviewer = interviewerRepository.findById(session.getInterviewerId()).orElse(null);
         List<SessionMessageView> messages = messageRepository.findBySessionIdOrderBySeqAsc(sessionId)
@@ -439,7 +451,8 @@ public class InterviewEngine {
                 session.getEventSequence(),
                 script == null ? null : script.getCode(),
                 interviewer == null ? null : interviewer.getCode(),
-                messages);
+                messages,
+                MediaStateStore.parse(session.getMediaState(), objectMapper));
     }
 
     public SessionFinishView finishNow(Long sessionId) {

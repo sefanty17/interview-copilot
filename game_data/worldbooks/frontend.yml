@@ -1,0 +1,37 @@
+# 世界书：前端岗位背景（issue #1 世界书半）
+# 使用时整条注入 system 提示词，不参与检索；真相源是本文件，重启后由启动扫描入库。
+name: 前端岗位背景
+description: 校招前端岗的产品、团队与技术栈设定，供面试官追问时引用。
+job_code: frontend
+entries:
+  - id: company
+    name: 公司背景
+    priority: 10
+    activation: { type: always }
+    content: |-
+      你所在的公司做面向消费者的在线教育产品，日活约 200 万，前端团队 25 人，
+      按业务线分成课程、直播、增长三个小组，正在统一技术栈和组件库。
+
+  - id: role
+    name: 岗位职责
+    priority: 10
+    activation: { type: always }
+    content: |-
+      这个岗位是校招前端开发：负责课程详情页与直播互动模块，要求熟悉 JavaScript、
+      Vue 3、浏览器渲染原理和前端工程化，能独立完成一个页面从开发到上线的全流程。
+
+  - id: stack
+    name: 技术栈
+    priority: 5
+    activation: { type: keyword, keys: [技术栈, 框架, Vue, 构建, 工程化] }
+    content: |-
+      前端技术栈：TypeScript、Vue 3 + Vite、Pinia、Element Plus，自研组件库，
+      构建走 Vite + Rollup，质量靠 ESLint + Vitest + Playwright，发布用 CDN + 灰度。
+
+  - id: process
+    name: 面试流程
+    priority: 1
+    activation: { type: keyword, keys: [面试, 流程, 几轮, 多久] }
+    content: |-
+      面试共三轮：一轮 JavaScript 与 CSS 基础，二轮项目与场景题，三轮 HR 面。
+      每轮 45 分钟，会要求候选人现场讲清楚一个自己做过的最复杂的页面。

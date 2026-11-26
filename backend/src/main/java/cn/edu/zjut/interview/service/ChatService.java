@@ -38,6 +38,7 @@ import cn.edu.zjut.interview.stream.SentenceSplitter;
 import cn.edu.zjut.interview.speech.tts.TtsVoiceService;
 import cn.edu.zjut.interview.stream.SymbolParser;
 import cn.edu.zjut.interview.worldbook.Worldbook;
+import cn.edu.zjut.interview.worldbook.WorldbookInjector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
@@ -113,6 +114,25 @@ public class ChatService {
     private final KnowledgeInjector knowledgeInjector;
 
     /**
+     * 世界书注入（issue #1）：按会话岗位从两张表组装固定背景，与 CLOB 分支叠加。
+     */
+    private final WorldbookInjector worldbookInjector;
+
+    /**
+     * 自由面试（issue #11）：识别岗位 → 按岗位随机抽题 → 把当前题拼进本轮 system。
+     *
+     * <p>剧本场次直接返回 inactive，与改造前逐字一致。
+     */
+    private final FreeInterviewService freeInterviews;
+
+    /**
+     * 面试印象：每 3 条候选人回答后台评估一次，通过 {@code ai:impression} 事件推给前端。
+     *
+     * <p>评估失败不影响本轮对话，只是这一档不变。
+     */
+    private final ImpressionService impressions;
+
+    /**
      * 档位变更时的一次性 announce 文案（批次 4.4，对齐 take_temporary_memories 的 take 语义）：
      * PUT 成功时 put，runTurn 取走即弃、不落库。重启丢失可接受（原版也是会话内存态）。
      */
@@ -171,6 +191,9 @@ public class ChatService {
                        InterviewerRelationService interviewerRelations,
                        GodAgentCore godAgent,
                        KnowledgeInjector knowledgeInjector,
+                       WorldbookInjector worldbookInjector,
+                       FreeInterviewService freeInterviews,
+                       ImpressionService impressions,
                        TtsVoiceService ttsVoiceService) {
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -186,6 +209,9 @@ public class ChatService {
         this.interviewerRelations = interviewerRelations;
         this.godAgent = godAgent;
         this.knowledgeInjector = knowledgeInjector;
+        this.worldbookInjector = worldbookInjector;
+        this.freeInterviews = freeInterviews;
+        this.impressions = impressions;
         this.ttsVoiceService = ttsVoiceService;
     }
 
@@ -224,6 +250,12 @@ public class ChatService {
 
         // 2. 拼完整 system 串
         String systemPrompt = buildSystemPrompt(interviewer, profile, script);
+        // 2.1 专项训练（练习计划点进来）：把「这一场只深挖什么」压进 system，剧本路径才生效
+        String focusLabel = script == null ? null : trimToNull(request.focusLabel());
+        String focusBrief = script == null ? null : trimToNull(request.focusBrief());
+        if (focusLabel != null) {
+            systemPrompt += buildFocusBlock(focusLabel, focusBrief);
+        }
 
         // 3. 建 interview_session 行
         InterviewSession session = new InterviewSession();
@@ -232,6 +264,10 @@ public class ChatService {
         session.setInterviewerId(interviewer.getId());
         session.setScriptId(script == null ? null : script.getId());
         session.setJobCode(jobId);
+        // 专项训练留痕：记录本场针对哪个维度、训练要点是什么，便于记录页/复盘查看
+        if (focusLabel != null) {
+            session.setKps(focusKps(request.focusCode(), focusLabel, focusBrief));
+        }
         session.setStatus("running");
         // 在场角色：默认只有主面试官（多人由 setPresentRoleIds 追加）
         session.setPresentRoleIds(String.valueOf(interviewer.getId()));
@@ -246,7 +282,10 @@ public class ChatService {
         // 5. 落开场白（seq=1，情绪从 opening 里解析，没有就「正常」）
         //    自由对话（script == null）不再把开场白落库：开场白只是给前端看的欢迎语，
         //    不进 LLM 记忆，之后 seq 自然从 max+1 起。剧本会话保留原行为。
-        String opening = interviewer.getOpening() == null ? "" : interviewer.getOpening();
+        //    自由面试（issue #11）：开场白改成「先问你今天想面什么岗位」，由提问开启整场。
+        String opening = script == null
+                ? freeOpening(interviewer)
+                : (interviewer.getOpening() == null ? "" : interviewer.getOpening());
         List<EmotionSegment> segments = symbolParser.parse(opening);
         EmotionSegment first = segments.isEmpty() ? null : segments.get(0);
         String openingMessage = first == null ? opening.strip() : first.followingText();
@@ -327,11 +366,23 @@ public class ChatService {
             saveMessage(session.getId(), userSeq, InterviewMessage.ROLE_USER, main, null, null, null,
                     InterviewMessage.PLAYER_ROLE_ID);
 
+            // 3.5 自由面试（issue #11）：从这句自述里识别岗位 → 随机抽题 → 维护追问轮次。
+            //     剧本场次返回 inactive，本轮后面的注入与事件全部跳过。
+            FreeInterviewService.FreeProgress free = freeInterviews.prepare(
+                    session, main,
+                    messageRepository.countBySessionIdAndRole(session.getId(), InterviewMessage.ROLE_USER));
+            String freeBlock = freeInterviews.promptBlock(free);
+
             // 4. emit ai:thinking
             Map<String, Object> thinking = new LinkedHashMap<>();
             thinking.put("isThinking", true);
             thinking.put("duration", 0);
             send(emitter, "ai:thinking", thinking);
+
+            // 换岗位 / 换题时把新状态推给前端，抬头能立刻显示「岗位 + 第几题」
+            if (free.active() && free.changed()) {
+                send(emitter, "ai:question", freeEvent(free));
+            }
 
             LlmOptions options = LlmOptions.from(configService);
             StringBuilder accumulated = new StringBuilder();
@@ -362,6 +413,9 @@ public class ChatService {
                 if (worldbook != null) {
                     worldbook.inject(messages, rounds == 0 ? main : null);
                 }
+                // 5.5.1 表驱动世界书（issue #1）：按会话岗位注入，与角色卡 CLOB 分支叠加；
+                // 两条都为空时零开销，注入只改本轮副本
+                worldbookInjector.inject(session, messages, rounds == 0 ? main : null);
 
                 // 5.6 批次 4.4 一次性临时 system 注入（announce / 上一轮纠偏），取走即弃、不落库
                 injectPendingSystemMessages(messages, session.getId());
@@ -371,14 +425,18 @@ public class ChatService {
                 // 与 5.5 同一铁律：只改本轮请求副本，绝不写回台词表。
                 injectKnowledge(messages, main, speaker, session, emitter);
 
+                // 5.8 自由面试题目注入：本轮最贴近的指令，放在最后，确保「现在该问什么」压过其它资料
+                injectFreeBlock(messages, freeBlock);
+
                 // 6~8. LlmClient.stream → SentenceSplitter → SymbolParser → 落库 + emit
                 // 思考链缓冲：对齐 producer.rs:181-193 —— 累积本轮全部 reasoning_content，
                 // 部分供应商会在流结束时重发完整快照，新片以已有内容为前缀时整体替换而非追加。
                 StringBuilder thinkingBuf = new StringBuilder();
                 ReplyPublisher publisher = new ReplyPublisher(emitter, session, speaker, userSeq);
+                // 句数上限仍按 chat.reply_count；不做跨台词合并（合并会把「短转场 + 提问」并成
+                // 一句，解析时只取首段，提问就丢了）
                 SentenceSplitter splitter = new SentenceSplitter(
-                        configService.getInt(ConfigKey.CHAT_MERGE_THRESHOLD),
-                        configService.getInt(ConfigKey.CHAT_REPLY_COUNT));
+                        0, configService.getInt(ConfigKey.CHAT_REPLY_COUNT));
                 final StringBuilder thinkingRef = thinkingBuf;
                 LlmOptions optionsWithReasoning = options.withReasoning(reasoning -> {
                     // 同步替换/追加，语义同 producer.rs：快照前缀则整体替换
@@ -430,6 +488,15 @@ public class ChatService {
                     break;
                 }
                 speaker = next;
+            }
+
+            // 8.5 面试印象：每 3 条候选人回答评估一次。失败静默——回复已经发出去了，
+            // 不能因为旁路评估把本轮打成错误。
+            try {
+                impressions.evaluateIfDue(session, speaker)
+                        .ifPresent(view -> send(emitter, "ai:impression", view));
+            } catch (Exception e) {
+                log.warn("[ChatService] 会话 {} 印象评估异常，忽略：{}", session.getId(), e.getMessage());
             }
 
             // 9. 流结束：空回复兜底 + status:reset
@@ -555,6 +622,46 @@ public class ChatService {
         payload.put("count", items.size());
         payload.put("items", items);
         send(emitter, "ai:knowledge", payload);
+    }
+
+    /**
+     * 自由面试：把「当前题目 + 参考要点」追加到 system 末尾（issue #11）。
+     *
+     * <p>与 {@link #injectKnowledge} 同一铁律：只改本轮请求副本，绝不写回台词表；
+     * 剧本场次 {@code block == null}，直接跳过。
+     */
+    private void injectFreeBlock(List<LlmMessage> messages, String block) {
+        if (block == null) {
+            return;
+        }
+        if (messages.isEmpty() || !LlmMessage.ROLE_SYSTEM.equals(messages.get(0).role())) {
+            messages.add(0, LlmMessage.system(block));
+        } else {
+            messages.set(0, LlmMessage.system(messages.get(0).content() + "\n\n" + block));
+        }
+    }
+
+    /** {@code ai:question} 的 payload：字段与 {@code FreeStateView} 对齐，前端直接覆盖抬头。 */
+    private Map<String, Object> freeEvent(FreeInterviewService.FreeProgress free) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("free", true);
+        payload.put("changed", free.changed());
+        payload.put("jobCode", free.jobCode());
+        payload.put("jobName", free.jobName());
+        payload.put("askedCount", free.askedCount());
+        payload.put("questionCount", free.questionCount());
+        if (free.question() == null) {
+            payload.put("question", null);
+        } else {
+            Map<String, Object> question = new LinkedHashMap<>();
+            question.put("id", free.question().getId());
+            question.put("kp", free.question().getKp());
+            question.put("type", free.question().getType());
+            question.put("difficulty", free.question().getDifficulty());
+            question.put("text", free.question().getText());
+            payload.put("question", question);
+        }
+        return payload;
     }
 
     /**
@@ -925,6 +1032,59 @@ public class ChatService {
         int length = message == null ? 0 : message.length();
         double raw = Math.max(DURATION_BASE, length * DURATION_PER_CHAR);
         return Math.round(raw * 10) / 10.0;
+    }
+
+    /**
+     * 自由面试的开场白（issue #11）：不再让面试官自报流程，而是把「你想面什么岗位」抛给候选人。
+     *
+     * <p>这句只随响应返回给前端展示，不落库（自由会话仍只落 system 一条），
+     * 真正的岗位识别发生在候选人回答之后（见 {@link FreeInterviewService#prepare}）。
+     */
+    private String freeOpening(Interviewer interviewer) {
+        return "先坐，我是" + interviewer.getName() + "。今天由我来面你，先聊聊：你想面什么岗位，或者哪个方向？";
+    }
+
+    /**
+     * 专项训练约束块：练习计划点进来时，只练一个维度，逼着往纵向深挖。
+     *
+     * <p>和完整流程的区别是「不换话题」：先项目背景，再方案与指标，最后失败与改进。
+     */
+    private String buildFocusBlock(String label, String brief) {
+        StringBuilder block = new StringBuilder();
+        block.append("\n\n【本场专项训练：").append(label).append("】\n");
+        block.append("本场不做完整流程，只围绕这个专项连续深挖，至少追问 2 层，不要主动换话题：\n");
+        block.append("1) 先让候选人用一个具体项目或经历说明，追问背景、目标和他的个人职责；\n");
+        block.append("2) 再追问方案取舍、关键指标与最终结果，要求给出数字或对比；\n");
+        block.append("3) 最后追问失败点、边界情况，以及如果重做会怎么改。\n");
+        block.append("每次只问一个问题，等候选人回答后再追问；回答空泛时先要细节，不要替候选人总结。\n");
+        if (brief != null) {
+            block.append("参考训练要点：").append(brief).append('\n');
+        }
+        return block.toString();
+    }
+
+    /** 空串归一成 null，避免前端传了空字段就当成「有专项」。 */
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.strip();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
+     * 专项信息落 {@code interview_session.kps}（VARCHAR 512）。
+     *
+     * <p>只做展示/追溯，不参与对话；brief 截到 300 字，保证 JSON 不越过列长。
+     */
+    private String focusKps(String code, String label, String brief) {
+        String safeBrief = brief != null && brief.length() > 300 ? brief.substring(0, 300) : brief;
+        return "{\"code\":\"" + safe(code) + "\",\"label\":\"" + safe(label)
+                + "\",\"brief\":\"" + safe(safeBrief) + "\"}";
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value.replace("\"", "'");
     }
 
     /** 拼 system 串：人设 + 面试编排 + 框架句 + 格式 + 示例 + 情绪限制 + 正文要求 + 身份/关系块。 */

@@ -5,7 +5,7 @@
  * 草稿 = localStorage，键 interview-lab-role-overrides，结构 { [角色 code]: RoleSettings }。
  * 基线值（人设、布局数值）来自 data/interviewers.ts，改动只写覆盖层，底板数据不动。
  */
-import { findInterviewer } from "../data/interviewers";
+import { findInterviewer } from "./interviewers";
 import type { AvatarDisplayMode, Live2dSettings } from "../types/live2d";
 
 const STORAGE_KEY = "interview-lab-role-overrides";

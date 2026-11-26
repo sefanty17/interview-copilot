@@ -1,6 +1,8 @@
-// 角色卡数据（由 scripts/gen_interviewers_ts.py 生成，勿手改）
+// 角色卡静态种子（由 scripts/gen_interviewers_ts.py 生成，勿手改）
 // 源：references/lingchat/data/game_data/characters/*/settings.yml
-// 人设全文与范例留在后端 interviewers.json，这里只放展示字段。
+//
+// #11 之后，运行时的权威源是后端 `interviewer` 表（store/interviewers.ts 启动时拉
+// `/api/interviewers` + 详情并原地覆盖）；这份数组只在后端不可用时作离线回退。
 
 export type InterviewerCode = "strict" | "friendly" | "pressure" | "expert";
 

@@ -110,7 +110,7 @@ import LcSlider from "../../ui/LcSlider.vue";
 import LcToggle from "../../ui/LcToggle.vue";
 import LcSelect from "../../ui/LcSelect.vue";
 import { notify, store, updateSettings } from "../../../store/appStore";
-import type { SiteSettings } from "../../../data/mock";
+import type { SiteSettings } from "../../../types/domain";
 
 type VolumeKey = "volumeSpeaker" | "volumeSfx" | "volumeBgm" | "volumeAchievement" | "volumeAmbient";
 

@@ -12,6 +12,8 @@ public record KnowledgeHit(
         long docId,
         String docCode,
         String docTitle,
+        /** 文档内片段序号（从 0 开始），前端展示「第 N 段」与定位原文。 */
+        int chunkIndex,
         String heading,
         String text,
         double score,

@@ -3,6 +3,7 @@ import { canStartAsr, chatActive } from "./gates";
 import { discardRecording, start, stop, toggleAutoListenFunction } from "./session";
 import { getPttState, pttKeyDown, pttKeyUp, resetPtt } from "./ptt-state";
 import { activeSource, phase, runtime } from "./state";
+import { roomStore } from "../../store/roomStore";
 import { bindingMatches, isDirKey, parsePttBinding, type ShortcutBinding } from "../../utils/shortcuts";
 
 /** 解析持久化的快捷键绑定；非法 JSON / 缺字段回退默认裸键。
@@ -10,6 +11,23 @@ import { bindingMatches, isDirKey, parsePttBinding, type ShortcutBinding } from 
  *  解析策略统一走 utils/shortcuts 的 parsePttBinding（设置页显示同款）。 */
 function resolvePttBinding(): ShortcutBinding {
   return parsePttBinding(runtime.asrStore?.settings?.ptt_key) ?? { key: "f8" };
+}
+
+// ── 「开始录音前停掉正在播的 TTS」的回调（issue #10） ──
+//
+// 为什么不在这里直接 import 播放器：ASR 是低层组件（GameDialog 里用），播放器在
+// 房间页，反向依赖会形成环（房间页 → GameDialog → ptt → 房间页）。改成房间页启动时
+// 注册一个回调，ASR 只负责「该停了就喊一声」。
+let stopVoiceBeforeRecording: (() => void) | null = null;
+
+/**
+ * 注册「开始录音前停掉 TTS」的回调。
+ *
+ * <p>传 {@code null} 解除注册（房间页卸载时调用）。播放器本身没有在播时，
+ * 回调里调 {@code stop()} 是无害的空操作，所以这里不需要额外判断。
+ */
+export function setStopVoiceBeforeRecording(fn: (() => void) | null): void {
+  stopVoiceBeforeRecording = fn;
 }
 
 // ── 按住说话(PTT)快捷键 v2：auto_listen 模式关 = 长按 PTT / 单击 toggle 双语义；
@@ -26,10 +44,32 @@ function resolvePttBinding(): ShortcutBinding {
 // - 手势状态机（ptt-state）与两种语义完全不变。
 // 注：设置项 ptt_global 仍会被后端保存，但本项目不消费它（设置页 V3b 可标注「浏览器不适用」）。
 
+/**
+ * 门控拒绝时给用户一句提示（不再静默）。
+ *
+ * <p>为什么需要：门控是「静默 return」，用户点麦克风没反应时会以为功能坏了。
+ * 最常见的两种拒绝原因是「语音输入总开关关着」和「识别服务没配好」（缺 API Key），
+ * 这两条用户自己能修，必须告诉他。
+ *
+ * <p>用 window 自定义事件而不是直接 import `notify`：本模块在 composable 层，
+ * 不依赖 store，事件由 GameDialog 监听后弹提示（与 asr-text / asr-send 同一套模式）。
+ */
+function notifyBlocked(reason: string): void {
+  window.dispatchEvent(new CustomEvent("asr-blocked", { detail: reason }));
+}
+
+/** 当前对话状态（input / thinking / responding），门控拒绝时用来分辨原因。 */
+function roomStoreState(): string {
+  return roomStore.state;
+}
+
 /** PTT 按下统一入口：门控（总开关/路由/AI 生成/TTS 播放等）+ 状态机推进。 */
 export function pttDown() {
   // 总开关门控（用户需求：两种行为都只能在语音输入总开关开启后生效）
-  if (!runtime.asrStore?.settings?.voice_input_enabled) return;
+  if (!runtime.asrStore?.settings?.voice_input_enabled) {
+    notifyBlocked("语音输入已关闭，请到「设置 → 高级设置 → 语音识别」打开总开关");
+    return;
+  }
   // 行为 2：auto_listen 模式开 → 快捷键专职切换启用开关（toggleAutoListenFunction 只动运行态）。
   // 与行为 1 一致：仅聊天上下文（chatActive）生效——其它界面翻转 autoListenActive
   // 会在进聊天后未经交互启动自动监听
@@ -48,13 +88,25 @@ export function pttDown() {
     return;
   }
   if (cmd.kind === "start" || cmd.kind === "restart") {
-    // 门控（手动语义）：聊天场景外、抽屉开、AI 生成中、TTS 播放中等 → 静默拒绝；
+    // 门控（手动语义）：聊天场景外、抽屉开、AI 生成中、TTS 播放中等 → 拒绝；
     // restart = toggle-held 中按下但会话已被外部 discard（AI 进 thinking 等）→ 一次按键重启
     if (!chatActive.value || !canStartAsr({ forManual: true })) {
       // 门控拒绝：状态机复位（不残留 pending），后续 keyup 落空无害
       resetPtt();
+      // 区分原因：对话状态不是 input 时是「等面试官说完」，其余给通用提示。
+      // 总开关已在函数入口拦过，这里不必重复。
+      if (!chatActive.value) {
+        notifyBlocked("当前不在面试界面，无法录音");
+      } else if (roomStoreState() !== "input") {
+        notifyBlocked("等面试官说完再录音");
+      } else {
+        notifyBlocked("麦克风暂时不可用，请检查识别服务配置");
+      }
       return;
     }
+    // 开始录音前先停掉正在播的 TTS（issue #10）：不停的话面试官的声音会被录进
+    // 候选人这一轮的输入里，识别结果里混进 AI 自己的话。
+    stopVoiceBeforeRecording?.();
     // 立即开始录音（不丢首字）；PTT_TAP_THRESHOLD_MS 内松开由 keyup 判定为
     // 单击，否则 keyup 时按长按结束
     void start("button").catch((err) => {

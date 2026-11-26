@@ -92,7 +92,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { ArrowDown, ArrowUp, Star, X } from "@lucide/vue";
-import type { SceneInfo } from "../../../data/mock";
+import type { SceneInfo } from "../../../types/domain";
 
 const props = defineProps<{
   show: boolean;

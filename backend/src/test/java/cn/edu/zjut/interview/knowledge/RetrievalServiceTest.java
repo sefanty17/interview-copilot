@@ -162,10 +162,17 @@ class RetrievalServiceTest {
                 RetrievalService.SearchOptions.defaults(), RetrievalService.RetrievalMode.VECTOR_ONLY).isEmpty());
     }
 
-    /** 6. 范围：岗位过滤 + 挂载优先（挂载了就不再按岗位捞别的文档）。 */
+    /** 6. 范围：传了角色就只按挂载，0 本即空范围；不传角色才按岗位分类。 */
     @Test
-    void 检索范围先挂载后岗位() {
-        // 岗位过滤：frontend 只能出现前端那篇
+    void 检索范围传角色只按挂载() {
+        // 未挂载：即使传了 jobCode 也不回落到岗位分类——空范围就是查不到
+        knowledgeService.setDocCodesOf(ROLE, List.of());
+        assertEquals(0, retrievalService.scopeSize(ROLE, "java"));
+        assertTrue(retrievalService.search("垃圾回收器", ROLE, "java",
+                        RetrievalService.SearchOptions.defaults(), RetrievalService.RetrievalMode.HYBRID).isEmpty(),
+                "角色未挂载时应为空范围，不能退化成按岗位捞整库");
+
+        // 岗位过滤：不传角色时 frontend 只能出现前端那篇
         List<KnowledgeHit> frontend = retrievalService.search("打包优化按路由拆包", null, "frontend",
                 RetrievalService.SearchOptions.defaults(), RetrievalService.RetrievalMode.HYBRID);
         assertFalse(frontend.isEmpty(), "frontend 岗位应能命中拆包那段");
@@ -173,7 +180,7 @@ class RetrievalServiceTest {
                 "出现了非前端文档的片段：" + frontend);
         assertEquals(2, retrievalService.scopeSize(null, "frontend"));
 
-        // 挂载优先：strict 只挂数据库那篇，即使同时传了 jobCode=java 也不该捞到 JVM 那篇
+        // 挂载：strict 只挂数据库那篇，即使同时传了 jobCode=java 也不该捞到 JVM 那篇
         knowledgeService.setDocCodesOf(ROLE, List.of(DB_DOC));
         assertEquals(2, retrievalService.scopeSize(ROLE, "java"));
         assertTrue(retrievalService.search("垃圾回收器", ROLE, "java",

@@ -48,6 +48,10 @@ export interface CreateSessionPayload {
   jobId: string;
   /** 指定剧本编码（后端 CreateSessionRequest.scriptCode）；留空则建纯自由会话，要演剧本再调 startScript */
   scriptCode?: string;
+  /** 专项训练：维度 code / 名称 / 当天要点；从练习计划进入剧本面试时带上 */
+  focusCode?: string;
+  focusLabel?: string;
+  focusBrief?: string;
 }
 
 export interface CreateSessionResult {
@@ -76,6 +80,27 @@ export interface SessionMessage {
   userMessageSeq: number | null;
 }
 
+/**
+ * 舞台媒体快照（`interview_session.media_state`，issue #13）。
+ *
+ * 字段名与后端 `MediaStateStore` 写出的 JSON、以及 SSE payload 的 camelCase 一致，
+ * 前端不需要第二套映射。空字段表示「该阶段没下发过这类事件」。
+ */
+export interface SessionMediaState {
+  background?: { imagePath: string; transition: number } | null;
+  backgroundEffect?: { effect: string } | null;
+  music?: { musicPath: string; playbackSpeed?: number; playing?: boolean } | null;
+  /** 一次性音效只记录最后一条，**不恢复**（刷新重放会凭空多一声） */
+  sound?: { soundPath: string; at: number } | null;
+  ambient?: Array<{
+    ambientPath: string;
+    volume?: number;
+    loop?: boolean;
+    fade?: boolean;
+  }> | null;
+  presentPic?: { imagePath: string; scale?: number } | null;
+}
+
 /** `GET /api/sessions/{id}` 的返回体（规格 S4 §改动1-4）。
  *
  *  `messages` 不在此规格的字段清单里，但后端 `SessionDetailView` 确实带它，
@@ -92,6 +117,70 @@ export interface SessionDetail {
   scriptCode: string | null;
   interviewerCode: string;
   messages: SessionMessage[];
+  /** 舞台媒体快照；null = 这场从没下发过媒体事件 */
+  mediaState: SessionMediaState | null;
+}
+
+/** 自由面试当前题目（后端 `interview_question` 的展示字段，不含参考要点）。 */
+export interface FreeQuestion {
+  id: number;
+  kp: string;
+  type: string;
+  difficulty: string;
+  text: string;
+}
+
+/**
+ * 自由面试状态（后端 `FreeStateView`，issue #11）。
+ *
+ * `GET /api/sessions/{id}/free-state` 与 SSE `ai:question` 的 data 是同一个结构，
+ * 后者多一个 `changed`（本次是否换了岗位 / 换了题）。
+ */
+export interface FreeState {
+  free: boolean;
+  jobCode: string | null;
+  jobName: string | null;
+  /** 本场已抽中的题目数（含正在聊的这道） */
+  askedCount: number;
+  /** 该岗位题库总数 */
+  questionCount: number;
+  question: FreeQuestion | null;
+  changed?: boolean;
+}
+
+/** 自由面试状态：刷新 / 重进房间时恢复「岗位 + 第几题」抬头。 */
+export async function fetchFreeState(sessionId: number): Promise<FreeState> {
+  const response = await fetch(`/api/sessions/${sessionId}/free-state`);
+  if (!response.ok) {
+    throw new Error(`fetchFreeState 失败：HTTP ${response.status}`);
+  }
+  return (await response.json()) as FreeState;
+}
+
+/**
+ * 面试印象（后端 `ImpressionView`）：`GET /api/sessions/{id}/impression`
+ * 与 SSE `ai:impression` 的 data 是同一个结构。
+ *
+ * <p>正面 / 负面各六维，`*Deltas` 是本次评估的增量，`reason` 是评估依据。
+ */
+export interface ImpressionView {
+  roleId: number;
+  evaluated: boolean;
+  evaluatedUserCount: number;
+  positive: Record<string, number>;
+  negative: Record<string, number>;
+  positiveDeltas: Record<string, number>;
+  negativeDeltas: Record<string, number>;
+  reason: string;
+}
+
+/** 面试印象：刷新 / 重进房间时恢复（未评估时六维全 0 且 evaluated=false）。 */
+export async function fetchImpression(sessionId: number): Promise<ImpressionView> {
+  const response = await fetch(`/api/sessions/${sessionId}/impression`);
+  if (!response.ok) {
+    throw new Error(`fetchImpression 失败：HTTP ${response.status}`);
+  }
+  return (await response.json()) as ImpressionView;
 }
 
 /** `script:narration` 的 data（字段名照抄后端 SseEventSink，不许改）。 */
@@ -278,6 +367,85 @@ export async function fetchSessionDetail(sessionId: number): Promise<SessionDeta
   return (await response.json()) as SessionDetail;
 }
 
+// ───────────────────── 回复长度档位（issue #16 A4） ─────────────────────
+
+/**
+ * 回复台词数量档位，对应后端 `ReplyLengthMode`。
+ *
+ * <p>三档语义（后端逐字对齐原版 `utils/prompt.rs:398-507`）：
+ * <ul>
+ *   <li>{@code short}：1~2 句</li>
+ *   <li>{@code normal}：3~5 句（默认）</li>
+ *   <li>{@code free}：不限制</li>
+ * </ul>
+ *
+ * <p>只在自由对话生效：原版 `reply_length_adjustable()` 的第一个条件就是「不在剧本里」
+ * （`script_status.is_none()`），剧本节奏是作者写死的，切档位没有意义。
+ */
+export type ReplyLengthMode = "short" | "normal" | "free";
+
+/** 档位的中文标签与说明，房间页与设置页共用同一份文案。 */
+export const REPLY_LENGTH_LABELS: Record<ReplyLengthMode, { label: string; hint: string }> = {
+  short: { label: "短", hint: "每次回复 1~2 句" },
+  normal: { label: "正常", hint: "每次回复 3~5 句" },
+  free: { label: "自由", hint: "不限制台词数量" },
+};
+
+/**
+ * 读当前档位。
+ *
+ * @returns 档位；试玩会话返回 `null`（试玩结束时状态会整体还原，读档位没有意义）
+ */
+export async function fetchReplyLengthMode(sessionId: number): Promise<ReplyLengthMode | null> {
+  const response = await fetch(`/api/chat/sessions/${sessionId}/reply-length-mode`);
+  if (!response.ok) {
+    throw new Error(`fetchReplyLengthMode 失败：HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { mode: string | null };
+  return (body.mode as ReplyLengthMode | null) ?? null;
+}
+
+/**
+ * 改档位。
+ *
+ * <p>后端会在下一轮生成前插入一条一次性 system 提示（不落库、不写历史），
+ * 所以改完不会立刻生效在当前正在播放的那一句上，而是影响下一次回复。
+ *
+ * @throws Error 非法档位（400）或试玩会话（409），消息里带后端中文原因
+ */
+export async function saveReplyLengthMode(
+  sessionId: number,
+  mode: ReplyLengthMode,
+): Promise<ReplyLengthMode> {
+  const response = await fetch(`/api/chat/sessions/${sessionId}/reply-length-mode`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail ?? `saveReplyLengthMode 失败：HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { mode: string };
+  return body.mode as ReplyLengthMode;
+}
+
+/** 从 ProblemDetail 里取 `detail`；读不到返回 null，由调用方退回状态码。 */
+async function readErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+      const body = JSON.parse(text) as { detail?: string; message?: string; error?: string };
+      return body.detail ?? body.message ?? body.error ?? null;
+    } catch {
+      return text.slice(0, 200);
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** `POST /api/sessions/{id}/finish` 的返回体（规格 S5 改动 4）。 */
 export interface FinishResult {
   id: number;
@@ -292,7 +460,7 @@ export interface SessionSummary {
   status: string;
   score: number | null;
   jobCode: string;
-  scriptCode: string;
+  scriptCode: string | null;
   interviewerCode: string;
   startedAt: string | null;
   endedAt: string | null;
@@ -314,6 +482,14 @@ export async function fetchSessions(status?: string): Promise<SessionSummary[]> 
     throw new Error(`fetchSessions 失败：HTTP ${response.status}`);
   }
   return (await response.json()) as SessionSummary[];
+}
+
+/** 删除一场后端面试（连带台词与评估），记录页批量删除用。 */
+export async function deleteSession(sessionId: number): Promise<void> {
+  const response = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`deleteSession 失败：HTTP ${response.status}`);
+  }
 }
 
 /**
