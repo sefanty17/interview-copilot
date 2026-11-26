@@ -16,7 +16,7 @@
     python scripts/import_knowledge.py                     # 全量导入
     python scripts/import_knowledge.py --force             # 忽略指纹强制重传
     python scripts/import_knowledge.py --role strict,expert  # 导入后挂到角色卡
-    python scripts/import_knowledge.py --seed-bindings     # 只写演示用的角色卡绑定（strict 2 本 / pressure 1 本）
+    python scripts/import_knowledge.py --seed-bindings     # 只写演示用的角色卡绑定（4 个角色各挂几本）
     python scripts/import_knowledge.py --selftest          # 只跑切分逻辑断言，不需要后端
 """
 
@@ -43,12 +43,34 @@ INDEX_FILE = DEFAULT_DIR / ".knowledge-index.json"
 DEFAULT_API = "http://127.0.0.1:8080"
 
 # 演示用的最小绑定：角色 code → 文档 code。
-# 检索侧「传了角色就只按挂载」——没绑定就是空范围，所以这两个角色必须显式挂上语料，
-# 否则它们的一场面试永远不会注入知识。覆盖式写入（不是合并）：种子的意义是可复现，
+# 检索侧「传了角色就只按挂载，且不再按岗位过滤」——没绑定就是空范围，所以四个角色
+# 都必须显式挂上语料，否则换到该角色的面试永远不会注入知识。
+# java / frontend 两类都挂：同一角色可能被两个岗位复用，范围不按岗位裁剪。
+# 覆盖式写入（不是合并）：种子的意义是可复现，
 # 合并会把历史上误勾的文档留下，演示时检索范围就不受控了。
 SEED_BINDINGS = {
+    # 严格技术面：JVM + Spring 两个高频考点
     "strict": ["java-jvm-memory", "java-spring-core"],
+    # 压力面：只留并发，追问密度高
     "pressure": ["java-concurrency"],
+    # 温和 HR 面：基础与项目常识，两个岗位各两篇，换岗位也不会空
+    "friendly": [
+        "java-jvm-memory",
+        "java-spring-core",
+        "java-mysql-index",
+        "frontend-js-core",
+        "frontend-css-layout",
+    ],
+    # 技术专家面：深水区（并发 / MySQL / Redis / Spring）+ 前端运行时，覆盖两个岗位
+    "expert": [
+        "java-concurrency",
+        "java-jvm-memory",
+        "java-mysql-index",
+        "java-redis-cache",
+        "java-spring-core",
+        "frontend-js-core",
+        "frontend-browser-network",
+    ],
 }
 
 

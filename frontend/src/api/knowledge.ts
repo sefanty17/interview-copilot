@@ -33,11 +33,21 @@ export interface KnowledgeHit {
   docId: number;
   docCode: string;
   docTitle: string;
+  /** 文档内片段序号（从 0 开始）：前端显示「第 N 段」并定位原文 */
+  chunkIndex: number;
   heading: string;
   text: string;
   score: number;
   vectorScore: number;
   bm25Score: number;
+}
+
+/** 一篇文档的切块：导入后可检索的最小单位。 */
+export interface KnowledgeChunkView {
+  chunkIndex: number;
+  heading: string | null;
+  text: string;
+  charCount: number;
 }
 
 export interface KnowledgeSearchResult {
@@ -96,6 +106,12 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 export async function listKnowledgeDocs(): Promise<KnowledgeDocView[]> {
   const response = await request("/api/knowledge/docs");
   return (await response.json()) as KnowledgeDocView[];
+}
+
+/** 单篇文档的切块列表（按 chunkIndex 升序），用于预览与答辩演示。 */
+export async function listDocChunks(code: string): Promise<KnowledgeChunkView[]> {
+  const response = await request(`/api/knowledge/docs/${encodeURIComponent(code)}/chunks`);
+  return (await response.json()) as KnowledgeChunkView[];
 }
 
 /** 上传一篇 markdown 原文，后端切分并按指纹增量同步片段。 */

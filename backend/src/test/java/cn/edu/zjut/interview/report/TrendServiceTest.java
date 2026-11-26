@@ -89,7 +89,7 @@ class TrendServiceTest {
     void 短板取最近几场平均最低的两个维度() {
         String hitText = "Spring 事务传播级别 REQUIRED / REQUIRES_NEW 的区别";
         when(retrievalService.search(anyString(), any(), any(), any(), any()))
-                .thenReturn(List.of(new KnowledgeHit(1, 2, "spring-core", "Spring", "事务",
+                .thenReturn(List.of(new KnowledgeHit(1, 2, "spring-core", "Spring", 0, "事务",
                         hitText, 0.5, 0.4, 3.2)));
 
         // fit 平均 54、logic 平均 64、depth 74、technical 84 → 短板是 fit / logic
@@ -123,7 +123,7 @@ class TrendServiceTest {
     void 严阈值无命中时推荐放宽阈值兜底() {
         when(retrievalService.search(anyString(), any(), any(), any(), any()))
                 .thenReturn(List.of())
-                .thenReturn(List.of(new KnowledgeHit(1, 2, "spring-core", "Spring", "事务",
+                .thenReturn(List.of(new KnowledgeHit(1, 2, "spring-core", "Spring", 0, "事务",
                         "兜底命中的片段", 0.1, 0.1, 0.0)));
 
         Long only = newSession(1L, LocalDateTime.of(2026, 10, 1, 9, 0));

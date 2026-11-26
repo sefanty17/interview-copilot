@@ -6,6 +6,7 @@ import cn.edu.zjut.interview.domain.KnowledgeDoc;
 import cn.edu.zjut.interview.domain.KnowledgeVector;
 import cn.edu.zjut.interview.dto.ChunkCommand;
 import cn.edu.zjut.interview.dto.CreateDocCommand;
+import cn.edu.zjut.interview.dto.KnowledgeChunkView;
 import cn.edu.zjut.interview.dto.KnowledgeDocView;
 import cn.edu.zjut.interview.knowledge.EmbeddingProvider;
 import cn.edu.zjut.interview.knowledge.KnowledgeIndexVersion;
@@ -373,6 +374,15 @@ public class KnowledgeService {
     @Transactional(readOnly = true)
     public KnowledgeDocView getDoc(String docCode) {
         return toView(requireDoc(docCode));
+    }
+
+    /** 文档切块列表（按 chunkIndex 升序）：前端预览「导入后可检索的最小单位」。 */
+    @Transactional(readOnly = true)
+    public List<KnowledgeChunkView> listChunks(String docCode) {
+        KnowledgeDoc doc = requireDoc(docCode);
+        return chunkRepository.findByDocIdOrderByChunkIndexAsc(doc.getId()).stream()
+                .map(KnowledgeChunkView::of)
+                .toList();
     }
 
     /** 某角色勾选的文档 code 列表。 */

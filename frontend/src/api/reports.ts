@@ -32,6 +32,8 @@ export interface TrendKnowledgeHit {
   docId: number;
   docCode: string;
   docTitle: string;
+  /** 文档内片段序号（从 0 开始）；后端新增，旧数据缺失时为 undefined */
+  chunkIndex?: number;
   heading: string;
   text: string;
   score: number;

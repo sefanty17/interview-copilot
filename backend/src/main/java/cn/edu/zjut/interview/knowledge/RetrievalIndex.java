@@ -28,7 +28,7 @@ public final class RetrievalIndex {
      * （结果里的 text 要原样拼提示词，掺进模型生成的问题会让面试官念错东西）。
      */
     public record Doc(long chunkId, long docId, String docCode, String docTitle,
-                      String heading, String text, String hype) {
+                      int chunkIndex, String heading, String text, String hype) {
     }
 
     private final List<Doc> docs;

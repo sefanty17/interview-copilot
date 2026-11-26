@@ -247,7 +247,8 @@ public class RetrievalService {
             Candidate candidate = passed.get(i);
             RetrievalIndex.Doc doc = docs.get(candidate.position);
             hits.add(new KnowledgeHit(doc.chunkId(), doc.docId(), doc.docCode(), doc.docTitle(),
-                    doc.heading(), doc.text(), candidate.rrf, candidate.vectorScore, candidate.bm25Score));
+                    doc.chunkIndex(), doc.heading(), doc.text(), candidate.rrf,
+                    candidate.vectorScore, candidate.bm25Score));
         }
         return hits;
     }
@@ -321,6 +322,7 @@ public class RetrievalService {
                 continue;
             }
             docs.add(new RetrievalIndex.Doc(chunk.getId(), doc.getId(), doc.getCode(), doc.getTitle(),
+                    chunk.getChunkIndex() == null ? -1 : chunk.getChunkIndex(),
                     chunk.getHeading(), chunk.getText(), chunk.getHypeQuestions()));
         }
 

@@ -2,6 +2,7 @@ package cn.edu.zjut.interview.api;
 
 import cn.edu.zjut.interview.dto.ChunkCommand;
 import cn.edu.zjut.interview.dto.CreateDocCommand;
+import cn.edu.zjut.interview.dto.KnowledgeChunkView;
 import cn.edu.zjut.interview.dto.KnowledgeDocView;
 import cn.edu.zjut.interview.dto.KnowledgeHit;
 import cn.edu.zjut.interview.knowledge.EmbeddingProvider;
@@ -76,6 +77,12 @@ public class KnowledgeController {
     @GetMapping("/knowledge/docs/{code}")
     public KnowledgeDocView getDoc(@PathVariable String code) {
         return service.getDoc(code);
+    }
+
+    /** 切块列表：位置（chunkIndex）+ 内容，前端预览与答辩演示用。 */
+    @GetMapping("/knowledge/docs/{code}/chunks")
+    public List<KnowledgeChunkView> listChunks(@PathVariable String code) {
+        return service.listChunks(code);
     }
 
     @DeleteMapping("/knowledge/docs/{code}")
