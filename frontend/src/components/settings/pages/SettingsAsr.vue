@@ -766,6 +766,7 @@ import { notify } from "../../../store/appStore";
 import { asrStore } from "../../../store/asrStore";
 import { alertDialog, confirmDialog } from "../../../store/dialogStore";
 import type { AsrSettings } from "../../../api/asr";
+import { asrListModels, asrListProviders } from "../../../api/asr";
 import type { AsrModelState, AsrProviderConfig, SiteSettings } from "../../../types/domain";
 
 // ── 兼容层：语音设置改存后端 speech_setting 表，模板一行不改 ──────────────
@@ -906,165 +907,138 @@ const MODEL_SIZE_OPTIONS: AsrFieldOption[] = [
   { value: "large", label: "large（2.9 GB）" },
 ];
 
-/** 识别服务商清单：原版由后端 ProviderInfo 下发，本项目静态内置，字段形态与之一致 */
-const ASR_PROVIDERS: AsrProvider[] = [
+/**
+ * 识别服务商清单：**从后端 `GET /api/speech/asr/providers` 拉取**，不再前端硬编码。
+ *
+ * <p>为什么不静态内置：后端 `AsrRegistry.PROVIDER_ORDER` 只注册了
+ * {@code qwen-asr / llama-asr / mock-asr} 三项。前端此前内置了 6 项
+ * （含后端根本没有的 fun-asr / sense-voice / web-speech / auto-vad，
+ * 以及 id 写成 {@code qwen} 而后端要 {@code qwen-asr}），导致：
+ * 一是选了后端不认的 provider，识别必然失败；二是无 Key 环境下唯一可用的
+ * {@code mock-asr} 根本不在列表里，用户找不到。
+ *
+ * <p>兜底：后端不可达时退回最小的三项清单，保证设置页不白屏——但把
+ * `providersLoaded` 置 false，页面顶部会提示「服务商列表来自本地兜底」。
+ */
+const ASR_PROVIDERS = ref<AsrProvider[]>([]);
+const providersLoaded = ref(false);
+
+/** 后端不可达时的最小兜底：只列 AsrRegistry 真正注册的三个 id。 */
+const FALLBACK_PROVIDERS: AsrProvider[] = [
   {
-    id: "llama-asr",
-    display_name: "本地 llama-server（whisper.cpp）",
-    description: "本机运行的 llama-server / whisper.cpp，模型清单从服务端 /v1/models 拉取，无需联网。",
-    config_fields: [
-      {
-        key: "endpoint",
-        label: "端点地址",
-        kind: "text",
-        placeholder: "http://127.0.0.1:8080",
-        hint: "llama-server 的 OpenAI 兼容地址，服务没起时模型列表会拉不到",
-      },
-      { key: "model", label: "模型", kind: "select", options: [] },
-      {
-        key: "model_path",
-        label: "模型路径",
-        kind: "text",
-        placeholder: "models/ggml-base.bin",
-        hint: "本地 ggml / gguf 模型文件相对路径",
-      },
-      { key: "model_size", label: "模型大小", kind: "select", options: MODEL_SIZE_OPTIONS },
-      { key: "device", label: "设备", kind: "select", options: DEVICE_OPTIONS },
-      { key: "language", label: "语言", kind: "select", options: LANGUAGE_OPTIONS },
-      { key: "threads", label: "线程数", kind: "number", placeholder: "4" },
-      { key: "translate", label: "翻译为英文", kind: "boolean" },
-    ],
-    regions: [],
-    models: [
-      { id: "whisper-base", display_name: "Whisper Base（本地）", supports_streaming: false, is_default: true },
-      { id: "whisper-small", display_name: "Whisper Small（本地）", supports_streaming: false },
-      { id: "whisper-large-v3", display_name: "Whisper Large V3（流式）", supports_streaming: true },
-    ],
-  },
-  {
-    id: "fun-asr",
-    display_name: "FunASR（本地服务）",
-    description: "阿里 FunASR 本地服务，中文识别准确率高，支持热词与流式 paraformer。",
-    config_fields: [
-      {
-        key: "endpoint",
-        label: "端点地址",
-        kind: "text",
-        placeholder: "http://127.0.0.1:10095",
-      },
-      { key: "model", label: "模型", kind: "select", options: [] },
-      { key: "model_path", label: "模型路径", kind: "text", placeholder: "models/paraformer-zh" },
-      { key: "model_size", label: "模型大小", kind: "select", options: MODEL_SIZE_OPTIONS },
-      { key: "device", label: "设备", kind: "select", options: DEVICE_OPTIONS },
-      { key: "language", label: "语言", kind: "select", options: LANGUAGE_OPTIONS },
-      { key: "threads", label: "线程数", kind: "number", placeholder: "4" },
-      { key: "hotword", label: "热词", kind: "text", placeholder: "用空格分隔多个热词" },
-    ],
-    regions: [],
-    models: [
-      { id: "paraformer-zh", display_name: "Paraformer 中文（离线）", supports_streaming: false, is_default: true },
-      { id: "paraformer-zh-streaming", display_name: "Paraformer 中文（流式）", supports_streaming: true },
-      { id: "fun-asr-nano", display_name: "FunASR Nano（轻量）", supports_streaming: false },
-    ],
-  },
-  {
-    id: "sense-voice",
-    display_name: "SenseVoice（本地服务）",
-    description: "SenseVoiceSmall 多语言模型，带内置 VAD 与情感/事件标签。",
-    config_fields: [
-      { key: "endpoint", label: "端点地址", kind: "text", placeholder: "http://127.0.0.1:50000" },
-      { key: "model", label: "模型", kind: "select", options: [] },
-      { key: "model_path", label: "模型路径", kind: "text", placeholder: "models/SenseVoiceSmall" },
-      { key: "model_size", label: "模型大小", kind: "select", options: MODEL_SIZE_OPTIONS },
-      { key: "device", label: "设备", kind: "select", options: DEVICE_OPTIONS },
-      { key: "language", label: "语言", kind: "select", options: LANGUAGE_OPTIONS },
-      { key: "threads", label: "线程数", kind: "number", placeholder: "2" },
-      { key: "vad", label: "内置 VAD 切分", kind: "boolean" },
-    ],
-    regions: [],
-    models: [
-      { id: "sense-voice-small", display_name: "SenseVoiceSmall（离线）", supports_streaming: false, is_default: true },
-      { id: "sense-voice-small-streaming", display_name: "SenseVoiceSmall（流式）", supports_streaming: true },
-    ],
-  },
-  {
-    id: "qwen",
-    display_name: "云端 API（阿里云百炼 DashScope）",
-    description: "阿里云百炼语音识别，按地域分存 API Key，支持一句话识别与实时流式识别。",
+    id: "qwen-asr",
+    display_name: "Qwen ASR（阿里云百炼）",
+    description: "阿里云百炼语音识别，需填写 DashScope API Key（按地域分开保存）。",
     config_fields: [
       {
         key: "region",
         label: "地域",
         kind: "select",
         options: [
-          { value: "beijing", label: "北京" },
-          { value: "singapore", label: "新加坡（国际站）" },
+          { value: "cn-beijing", label: "华北2（北京）" },
+          { value: "ap-southeast-1", label: "新加坡（国际站）" },
         ],
-        hint: "切换地域会同步该地域的默认端点，API Key 按地域分别保存",
       },
-      {
-        key: "api_key",
-        label: "API Key",
-        kind: "password_map",
-        required: true,
-        placeholder: "sk-xxxxxxxxxxxxxxxx",
-      },
-      { key: "endpoint", label: "HTTP 端点地址", kind: "text" },
-      { key: "ws_endpoint", label: "WebSocket 端点地址", kind: "text" },
+      { key: "api_keys", label: "DashScope API Key", kind: "password_map", required: true },
+      { key: "endpoint", label: "非实时端点", kind: "text" },
+      { key: "ws_endpoint", label: "实时（流式）端点", kind: "text" },
       { key: "model", label: "模型", kind: "select", options: [] },
-      { key: "language", label: "语言", kind: "select", options: LANGUAGE_OPTIONS },
     ],
     regions: [
       {
-        id: "beijing",
-        label: "北京",
-        http_endpoint: "https://dashscope.aliyuncs.com/api/v1",
-        ws_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+        id: "cn-beijing",
+        label: "华北2（北京）",
+        http_endpoint:
+          "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+        ws_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
       },
       {
-        id: "singapore",
+        id: "ap-southeast-1",
         label: "新加坡（国际站）",
-        http_endpoint: "https://dashscope-intl.aliyuncs.com/api/v1",
-        ws_endpoint: "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime",
+        http_endpoint:
+          "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+        ws_endpoint: "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference",
       },
     ],
-    models: [
-      { id: "qwen3-asr-flash", display_name: "qwen3-asr-flash（一句话识别）", supports_streaming: false, is_default: true },
-      { id: "qwen3-asr-flash-realtime", display_name: "qwen3-asr-flash-realtime（实时）", supports_streaming: true },
-    ],
+    models: [],
   },
   {
-    id: "web-speech",
-    display_name: "浏览器原生识别",
-    description: "使用浏览器自带的语音识别（Web Speech API），无需任何本地模型与 Key，识别能力取决于浏览器。",
+    id: "llama-asr",
+    display_name: "本地 ASR（llama-server）",
+    description: "本地 llama-server Qwen3-ASR（整句识别），无需联网。",
     config_fields: [
-      { key: "language", label: "语言", kind: "select", options: LANGUAGE_OPTIONS },
-      { key: "interim_results", label: "显示中间结果", kind: "boolean" },
-      { key: "continuous", label: "连续识别", kind: "boolean" },
+      { key: "endpoint", label: "服务地址", kind: "text" },
+      { key: "model", label: "模型", kind: "select", options: [] },
+      { key: "api_key", label: "API Key（可选）", kind: "password" },
     ],
     regions: [],
-    models: [
-      { id: "web-speech-zh", display_name: "浏览器识别（中文）", supports_streaming: true, is_default: true },
-      { id: "web-speech-en", display_name: "浏览器识别（英语）", supports_streaming: true },
-    ],
+    models: [],
   },
   {
-    id: "auto-vad",
-    display_name: "自动语音检测（VAD）",
-    description: "只做人声端点检测：由 Silero VAD 决定何时开始/结束录音，识别仍交给上方选中的引擎。",
-    config_fields: [
-      { key: "device", label: "设备", kind: "select", options: DEVICE_OPTIONS },
-      { key: "sensitivity", label: "灵敏度（0–1）", kind: "number", placeholder: "0.5" },
-      { key: "min_speech_ms", label: "最短语音时长（毫秒）", kind: "number", placeholder: "250" },
-      { key: "language", label: "语言", kind: "select", options: LANGUAGE_OPTIONS },
-    ],
+    id: "mock-asr",
+    display_name: "本地模拟（无 key 联调用）",
+    description: "不连接任何语音服务，固定返回一段文本，用于联调前端录音链路。",
+    config_fields: [],
     regions: [],
-    models: [
-      { id: "vad-silero-zh", display_name: "Silero VAD（中文）", supports_streaming: true, is_default: true },
-      { id: "vad-silero-en", display_name: "Silero VAD（多语言）", supports_streaming: true },
-    ],
+    models: [],
   },
 ];
+
+/**
+ * 拉取服务商清单并补齐模型列表。
+ *
+ * <p>模型清单按 provider 单独拉（`GET /models?providerId=`）：qwen-asr 有 4 个真实模型，
+ * llama-asr / mock-asr 返回空数组（本地与模拟都不需要选模型）。
+ */
+async function loadProviders(): Promise<void> {
+  try {
+    const infos = await asrListProviders();
+    const mapped: AsrProvider[] = infos.map((info) => ({
+      id: info.id,
+      display_name: info.display_name,
+      description: info.description ?? "",
+      config_fields: (info.config_fields ?? []).map((f) => ({
+        key: f.key,
+        label: f.label,
+        kind: f.kind as FieldKind,
+        required: f.required,
+        placeholder: f.placeholder ?? undefined,
+        hint: f.hint ?? undefined,
+        default_value: f.default_value ?? undefined,
+        options: f.options ?? undefined,
+      })),
+      regions: (info.regions ?? []).map((r) => ({
+        id: r.id,
+        label: r.label,
+        http_endpoint: r.http_endpoint,
+        ws_endpoint: r.ws_endpoint,
+      })),
+      models: [],
+    }));
+    // 逐 provider 拉模型；失败只让该 provider 的模型列表为空，不影响整体
+    await Promise.all(
+      mapped.map(async (provider) => {
+        try {
+          const models = await asrListModels(provider.id);
+          provider.models = models.map((m) => ({
+            id: m.id,
+            display_name: m.display_name,
+            supports_streaming: m.supports_streaming,
+            is_default: m.is_default,
+          }));
+        } catch (e) {
+          console.warn(`[ASR] 拉取 ${provider.id} 的模型列表失败：`, e);
+        }
+      }),
+    );
+    ASR_PROVIDERS.value = mapped;
+    providersLoaded.value = true;
+  } catch (e) {
+    console.warn("[ASR] 拉取识别服务商失败，使用本地兜底清单：", e);
+    ASR_PROVIDERS.value = FALLBACK_PROVIDERS;
+    providersLoaded.value = false;
+  }
+}
 
 const MODEL_CATALOG: ModelAsset[] = [
   {
@@ -1117,7 +1091,8 @@ const MODEL_CATALOG: ModelAsset[] = [
 // ── 服务商 / 配置读写 ──────────────────────────────────────────
 
 const activeProviderInfo = computed<AsrProvider | undefined>(
-  () => ASR_PROVIDERS.find((p) => p.id === store.settings.active_provider) ?? ASR_PROVIDERS[0],
+  () => ASR_PROVIDERS.value.find((p) => p.id === store.settings.active_provider)
+    ?? ASR_PROVIDERS.value[0],
 );
 
 /** provider 的模型是否在它自己的表单里选（config_fields 含 model 字段即为是） */
@@ -1256,7 +1231,7 @@ interface ServiceItem {
 }
 
 const serviceGroups = computed<{ provider: AsrProvider; items: ServiceItem[] }[]>(() =>
-  ASR_PROVIDERS.map((p) => {
+  ASR_PROVIDERS.value.map((p) => {
     if (picksModelInForm(p)) {
       return { provider: p, items: [{ key: `${p.id}::`, label: p.display_name }] };
     }
@@ -1270,7 +1245,7 @@ const serviceGroups = computed<{ provider: AsrProvider; items: ServiceItem[] }[]
 
 const activeServiceKey = computed<string>(() => {
   const pid = store.settings.active_provider;
-  const info = ASR_PROVIDERS.find((p) => p.id === pid);
+  const info = ASR_PROVIDERS.value.find((p) => p.id === pid);
   if (!info || picksModelInForm(info)) return `${pid}::`;
   const key = `${pid}::${String(cfgValue("model") ?? "")}`;
   const group = serviceGroups.value.find((g) => g.provider.id === pid);
@@ -1335,6 +1310,15 @@ function requireBackend(action: string): void {
 
 // ── 顶部状态 ────────────────────────────────────────────────
 
+/**
+ * 该服务商是否缺少必填凭证。
+ *
+ * <p>修过一个「明明没 Key 却显示已就绪」的 bug：此前服务商清单是前端硬编码的，
+ * 而后端存的 {@code active_provider} 是 {@code qwen-asr}（清单里写的是 {@code qwen}），
+ * {@code ASR_PROVIDERS.find(...)} 找不到就 fallback 到第一项 {@code llama-asr}，
+ * 而它没有必填字段 → {@code missingCredential=false} → 显示「已就绪」。
+ * 现在清单由后端下发，id 一定对得上，判断才准。
+ */
 const missingCredential = computed(() => {
   if (!store.settings.voice_input_enabled) return false;
   const info = activeProviderInfo.value;
@@ -1346,13 +1330,20 @@ const missingCredential = computed(() => {
   });
 });
 
+/** 当前 provider 是否「后端声明需要凭证但没填」——mock-asr 这类无需凭证的不算缺。 */
 const statusText = computed(() => {
   if (!store.settings.voice_input_enabled) return "已关闭";
+  // 服务商清单还没拉回来时不谎报「已就绪」
+  if (!ASR_PROVIDERS.value.length) return "加载中…";
+  if (!providersLoaded.value) return "未就绪（服务商列表来自本地兜底）";
   return missingCredential.value ? "未配置（请先填写该服务商的 API Key）" : "已就绪";
 });
-const statusClass = computed(() =>
-  !store.settings.voice_input_enabled ? "text-gray-300" : missingCredential.value ? "text-red-400" : "text-green-400",
-);
+const statusClass = computed(() => {
+  if (!store.settings.voice_input_enabled) return "text-gray-300";
+  if (!ASR_PROVIDERS.value.length) return "text-white/40";
+  if (!providersLoaded.value) return "text-[#ffd166]";
+  return missingCredential.value ? "text-red-400" : "text-green-400";
+});
 
 const vadLoaded = computed(() => modelState("silero-vad").installed);
 
@@ -1488,6 +1479,9 @@ function setNumberFromEvent(key: keyof SiteSettings, event: Event): void {
 onMounted(() => {
   // 语音设置的真身在后端 speech_setting 表：进页面先拉一次。
   // load 之前模板读的是 asrStore 的本地默认值（与后端 defaults() 逐字段一致），不会闪错值。
+  // 服务商清单也要从后端拉（见 loadProviders 的注释：硬编码清单会列出后端不支持的项）。
+  // 两件事互不依赖，并发发出去；loadProviders 失败会退回兜底清单，不阻塞设置读写。
+  void loadProviders();
   void asrStore
     .load()
     // 补 default_value 必须排在 load 之后：它改的是本地副本，先改会被 load 的整体替换覆盖
